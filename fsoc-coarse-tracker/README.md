@@ -50,6 +50,29 @@ in `perception/frame_source.py` and `perception/pipeline.py`:
 See `config/default_config.yaml` for every configurable parameter and its
 default, and `docs/` for the technical report and user manual outlines.
 
+## Space-science relevance additions
+
+- `simulator/link_budget.py` -- converts tracking error (px) to angular
+  pointing error (µrad) to actual link cost (dB pointing loss against a
+  configured beam divergence), and reports when coarse pointing is inside
+  the fine-pointing stage's capture range (`handoff_ready_rate`,
+  `time_to_handoff_ready_sec` in the performance log). Also derives the
+  turbulence Fried parameter from a real Hufnagel-Valley Cn² integration
+  (`disturbances.turbulence.physical: true`) instead of an arbitrary
+  tuning constant.
+- `simulator/orbital.py` + `simulator/scenario_presets.py` -- three named
+  scenarios (`leo_leo_crosslink`, `leo_ground_downlink`, `geo_ground`)
+  whose target motion is derived from real orbital-mechanics formulas
+  (orbital velocity, pass geometry, station-keeping residual), not a
+  radius/speed picked to look reasonable. Select via `scenario_preset` in
+  config or the GUI's scenario dropdown.
+- `simulator/disturbances.py`'s `StructuredJitterModel` -- optional
+  resonant-PSD jitter (`disturbances.jitter.structured: true`) modeling
+  reaction-wheel-like narrow-band vibration instead of flat random noise.
+
+See `docs/technical_report.md` Section 11 for the full writeup and the
+formulas behind each.
+
 ## Known characteristics / tuning notes
 
 See `docs/technical_report.md` Sections 8-9 for the full writeup,

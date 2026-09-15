@@ -38,13 +38,44 @@ disturbances:
     gaussian: {enabled: false, sigma: 10}
     poisson: {enabled: false}
   max_noise_std_px: 20
-  jitter: {enabled: false, max_px: 20}
+  jitter:
+    enabled: false
+    max_px: 20
+    structured: false     # false = uniform random per-frame shift (spec default)
+    resonance_hz: 8.0      # only used when structured: true -- see simulator/disturbances.py's
+                           # StructuredJitterModel (reaction-wheel-like resonant vibration instead
+                           # of flat noise)
   atmosphere:
     mode: clear   # clear | haze | fog | rain | low_light
+  turbulence:
+    enabled: false
+    r0: 0.05               # used directly unless physical: true
+    physical: false        # true = derive r0 from a real Hufnagel-Valley Cn2 integration
+                           # (simulator/link_budget.py) instead of the r0 value above
+    wavelength_nm: 1550.0
+    altitude_m: 20000.0
+    zenith_deg: 0.0
   platform_motion:
     enabled: false
     mode: linear   # linear | circular | random | spiral | figure8
     max_px_frame: 20
+
+# Link-budget context for the tracking-error numbers: translates pixel
+# error into what it actually costs the FSOC link (see
+# simulator/link_budget.py). None of this changes the tracking algorithm;
+# it's additional reporting.
+link_budget:
+  beam_divergence_urad: 20.0            # 1/e^2 half-angle divergence of the laser beam
+  fine_stage_capture_range_urad: 500.0  # angular error below which the fine-pointing stage can take over
+  wavelength_nm: 1550.0
+  range_km: 1000.0
+
+# Named, physically-parametrized scenarios (simulator/scenario_presets.py):
+# leo_leo_crosslink | leo_ground_downlink | geo_ground. Selecting one
+# overrides target.motion/motion_params and link_budget with values
+# derived from real orbital mechanics -- see simulator/orbital.py. Leave
+# unset (null) to use the generic target/motion config above instead.
+scenario_preset: null
 
 detector:
   dog_sigma1: 1.0

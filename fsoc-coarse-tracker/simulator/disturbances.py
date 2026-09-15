@@ -51,6 +51,56 @@ def apply_jitter(img: np.ndarray, max_px: int = 20, rng: Optional[np.random.Gene
     return _shift(img, dx, dy), (dx, dy)
 
 
+@dataclass
+class StructuredJitterModel:
+    """Jitter with a resonance peak in its power spectral density, driven
+    by white noise through a per-axis damped-oscillator (second-order
+    resonant) filter, instead of independent uniform-random per-frame
+    displacement.
+
+    Real spacecraft jitter is not spectrally flat: reaction wheels,
+    cryocoolers and other rotating/reciprocating mechanisms impose
+    narrow-band vibration at their spin/operating frequency. Modeling
+    that (even simplified to a single dominant resonance) is what
+    distinguishes "structured platform jitter" from generic noise, and
+    is closer to what a real ADCS/pointing engineer would simulate.
+
+    Discrete-time damped oscillator per axis:
+        x[n] = 2*rho*cos(2*pi*f0*dt)*x[n-1] - rho^2*x[n-2] + w[n]
+    driven by white noise w[n], with rho<1 controlling the resonance
+    peak's sharpness (closer to 1 = narrower peak at f0) and the output
+    scaled to stay within max_px.
+    """
+    max_px: float = 20.0
+    resonance_hz: float = 8.0
+    damping: float = 0.985
+    _x_hist: Tuple[float, float] = (0.0, 0.0)  # x[n-1], x[n-2] for the pan axis
+    _y_hist: Tuple[float, float] = (0.0, 0.0)  # for the tilt axis
+    _scale_estimate: float = 1.0
+
+    def _step_axis(self, hist: Tuple[float, float], dt: float, rng: np.random.Generator) -> Tuple[float, Tuple[float, float]]:
+        theta = 2 * math.pi * self.resonance_hz * dt
+        x_prev1, x_prev2 = hist
+        w = rng.normal(0, 1.0)
+        x_new = 2 * self.damping * math.cos(theta) * x_prev1 - self.damping ** 2 * x_prev2 + w
+        return x_new, (x_new, x_prev1)
+
+    def step(self, dt: float, rng: Optional[np.random.Generator] = None) -> Tuple[int, int]:
+        rng = rng or np.random.default_rng()
+        x_new, self._x_hist = self._step_axis(self._x_hist, dt, rng)
+        y_new, self._y_hist = self._step_axis(self._y_hist, dt, rng)
+        # The resonant filter's steady-state output amplitude isn't fixed
+        # analytically here (it depends on damping/frequency/dt); track a
+        # running estimate of its typical magnitude and rescale so the
+        # displacement stays within +-max_px, matching the spec's jitter
+        # amplitude bound regardless of the resonance parameters chosen.
+        self._scale_estimate = 0.99 * self._scale_estimate + 0.01 * (abs(x_new) + abs(y_new) + 1e-6)
+        norm = self.max_px / max(self._scale_estimate * 3.0, 1e-6)
+        dx = int(np.clip(x_new * norm, -self.max_px, self.max_px))
+        dy = int(np.clip(y_new * norm, -self.max_px, self.max_px))
+        return dx, dy
+
+
 def _shift(img: np.ndarray, dx: int, dy: int) -> np.ndarray:
     out = np.zeros_like(img)
     h, w = img.shape[:2]
@@ -193,38 +243,84 @@ class DisturbanceConfig:
     poisson: bool = False
     jitter: bool = False
     jitter_max_px: int = 20
+    jitter_structured: bool = False       # resonant (structured PSD) jitter instead of uniform random
+    jitter_resonance_hz: float = 8.0
     atmosphere_mode: str = "clear"
     turbulence: bool = False
     turbulence_r0: float = 0.05
+    turbulence_physical: bool = False     # derive r0 from Hufnagel-Valley Cn2 instead of using turbulence_r0 directly
+    turbulence_wavelength_nm: float = 1550.0
+    turbulence_altitude_m: float = 20000.0
+    turbulence_zenith_deg: float = 0.0
 
     @classmethod
     def from_config(cls, cfg: dict) -> "DisturbanceConfig":
         d = cfg.get("disturbances", {})
         noise = d.get("noise", {})
+        jitter_cfg = d.get("jitter", {})
+        turb_cfg = d.get("turbulence", {})
         return cls(
             salt_pepper=noise.get("salt_pepper", {}).get("enabled", False),
             salt_pepper_amount=noise.get("salt_pepper", {}).get("amount", 0.10),
             gaussian=noise.get("gaussian", {}).get("enabled", False),
             gaussian_sigma=noise.get("gaussian", {}).get("sigma", 10.0),
             poisson=noise.get("poisson", {}).get("enabled", False),
-            jitter=d.get("jitter", {}).get("enabled", False),
-            jitter_max_px=d.get("jitter", {}).get("max_px", 20),
+            jitter=jitter_cfg.get("enabled", False),
+            jitter_max_px=jitter_cfg.get("max_px", 20),
+            jitter_structured=jitter_cfg.get("structured", False),
+            jitter_resonance_hz=jitter_cfg.get("resonance_hz", 8.0),
             atmosphere_mode=d.get("atmosphere", {}).get("mode", "clear"),
+            turbulence=turb_cfg.get("enabled", False),
+            turbulence_r0=turb_cfg.get("r0", 0.05),
+            turbulence_physical=turb_cfg.get("physical", False),
+            turbulence_wavelength_nm=turb_cfg.get("wavelength_nm", 1550.0),
+            turbulence_altitude_m=turb_cfg.get("altitude_m", 20000.0),
+            turbulence_zenith_deg=turb_cfg.get("zenith_deg", 0.0),
         )
+
+    def resolved_turbulence_r0(self) -> float:
+        """r0 (in the pixel-space units apply_turbulence expects) to
+        actually use: either the raw config value, or -- if
+        turbulence_physical is set -- derived from a real Hufnagel-Valley
+        Cn2 integration via simulator/link_budget.py, so the turbulence
+        strength traces back to real atmospheric-optics inputs instead of
+        being an arbitrary number."""
+        if not self.turbulence_physical:
+            return self.turbulence_r0
+        from simulator.link_budget import compute_fried_parameter, fried_parameter_pixel_equivalent
+        r0_m = compute_fried_parameter(
+            wavelength_nm=self.turbulence_wavelength_nm,
+            zenith_deg=self.turbulence_zenith_deg,
+            path_altitude_m=self.turbulence_altitude_m,
+        )
+        # Camera's angular resolution (deg/px); matches the 4deg/640px
+        # default -- an approximation when a different FOV/resolution is
+        # configured, since DisturbanceConfig doesn't carry camera state.
+        pixel_scale_deg = 4.0 / 640.0
+        return fried_parameter_pixel_equivalent(r0_m, self.turbulence_wavelength_nm, pixel_scale_deg)
 
 
 def apply_disturbances(img: np.ndarray, cfg: DisturbanceConfig,
-                        rng: Optional[np.random.Generator] = None) -> Tuple[np.ndarray, dict]:
+                        rng: Optional[np.random.Generator] = None,
+                        jitter_model: Optional["StructuredJitterModel"] = None,
+                        dt: float = 1 / 30.0) -> Tuple[np.ndarray, dict]:
     """Apply all enabled disturbances in a fixed, documented order:
     atmosphere -> turbulence -> noise -> jitter. Returns the processed
-    image and a dict of applied jitter offsets (for diagnostics)."""
+    image and a dict of applied jitter offsets (for diagnostics).
+
+    `jitter_model`: pass a persistent StructuredJitterModel instance (one
+    per SimulatorEngine, since it's stateful across frames) to use
+    structured (resonant-PSD) jitter instead of independent uniform
+    random displacement -- only takes effect when
+    cfg.jitter_structured is also set.
+    """
     rng = rng or np.random.default_rng()
     out = img
     info = {}
     if cfg.atmosphere_mode != "clear":
         out = apply_atmosphere(out, cfg.atmosphere_mode, rng)
     if cfg.turbulence:
-        out = apply_turbulence(out, cfg.turbulence_r0, rng=rng)
+        out = apply_turbulence(out, cfg.resolved_turbulence_r0(), rng=rng)
     if cfg.salt_pepper:
         out = apply_salt_pepper(out, cfg.salt_pepper_amount, rng)
     if cfg.gaussian:
@@ -232,6 +328,10 @@ def apply_disturbances(img: np.ndarray, cfg: DisturbanceConfig,
     if cfg.poisson:
         out = apply_poisson_noise(out, rng)
     if cfg.jitter:
-        out, (dx, dy) = apply_jitter(out, cfg.jitter_max_px, rng)
+        if cfg.jitter_structured and jitter_model is not None:
+            dx, dy = jitter_model.step(dt, rng)
+            out = _shift(out, dx, dy)
+        else:
+            out, (dx, dy) = apply_jitter(out, cfg.jitter_max_px, rng)
         info["jitter_dx"], info["jitter_dy"] = dx, dy
     return out, info

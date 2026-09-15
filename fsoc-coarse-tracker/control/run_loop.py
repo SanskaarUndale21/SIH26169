@@ -15,6 +15,8 @@ from control.stepper import PointingStepper
 from perf_logging.performance_logger import RunMetrics, write_run_log
 from perception.frame_source import FrameSource
 from perception.pipeline import PerceptionTrackingPipeline, Telemetry
+from simulator.link_budget import (LinkBudgetConfig, is_handoff_ready, pointing_loss_db,
+                                    px_error_to_angular_error)
 
 
 @dataclass
@@ -43,6 +45,7 @@ class TrackingRunner:
         self.stepper = PointingStepper(config, camera) if camera is not None else None
         self.actuator: Actuator = SimulatorActuator(ptz) if ptz is not None else NullActuator()
         self.ground_truth_fn = ground_truth_fn
+        self.link_cfg = LinkBudgetConfig.from_config(config)
         self.metrics = RunMetrics()
         self.telemetry_log: List[Telemetry] = []
         self.on_telemetry: Optional[Callable[[Telemetry, "any"], None]] = None
@@ -72,7 +75,15 @@ class TrackingRunner:
             proc_ms = (time.perf_counter() - t0) * 1000.0
 
             tracking_error = self._tracking_error(telemetry)
-            self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, proc_ms)
+            angular_error = link_loss = None
+            handoff_ready = None
+            if tracking_error is not None and frame.fov_deg is not None:
+                angular_error = px_error_to_angular_error(tracking_error, frame.fov_deg[0], frame.image.shape[1])
+                link_loss = pointing_loss_db(angular_error, self.link_cfg.beam_divergence_urad)
+                handoff_ready = is_handoff_ready(angular_error, self.link_cfg.fine_stage_capture_range_urad)
+            self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, proc_ms,
+                                       angular_error_urad=angular_error, link_loss_db=link_loss,
+                                       handoff_ready=handoff_ready)
             self.telemetry_log.append(telemetry)
             if self.on_telemetry:
                 self.on_telemetry(telemetry, frame)

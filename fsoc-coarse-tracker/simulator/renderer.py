@@ -8,7 +8,8 @@ from __future__ import annotations
 import numpy as np
 
 from simulator.camera_model import CameraModel
-from simulator.disturbances import DisturbanceConfig, PlatformMotionDrift, apply_disturbances
+from simulator.disturbances import (DisturbanceConfig, PlatformMotionDrift, StructuredJitterModel,
+                                     apply_disturbances)
 from simulator.scene import Scene
 
 
@@ -36,9 +37,15 @@ class SimulatorEngine:
         self.rng = np.random.default_rng(seed)
         self.t = 0.0
         self.background_level = background_level
+        self.jitter_model = StructuredJitterModel(
+            max_px=disturbance_cfg.jitter_max_px,
+            resonance_hz=disturbance_cfg.jitter_resonance_hz,
+        )
+        self._last_dt = 1 / 30.0
 
     def step(self, dt: float):
         self.t += dt
+        self._last_dt = dt
         if self.platform_motion is not None:
             dx, dy = self.platform_motion.step(dt)
             self.camera.world_x += dx
@@ -57,7 +64,8 @@ class SimulatorEngine:
             if self.camera.is_in_fov(u, v):
                 gt_positions.append((u, v))
                 _draw_target(img, u, v, target.size_px, target.shape)
-        img, info = apply_disturbances(img, self.disturbance_cfg, self.rng)
+        img, info = apply_disturbances(img, self.disturbance_cfg, self.rng,
+                                        jitter_model=self.jitter_model, dt=self._last_dt)
         # Jitter shifts the rendered image content itself (sensor-level
         # shake), so the target's *reported* ground-truth position must
         # shift with it too, or every jittered frame would show a spurious

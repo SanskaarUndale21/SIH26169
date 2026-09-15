@@ -34,6 +34,18 @@ class ConfigPanel(QWidget):
         src_layout.addLayout(file_row)
         layout.addWidget(src_group)
 
+        # --- scenario preset ---
+        scenario_group = QGroupBox("Scenario preset (optional)")
+        f = QFormLayout(scenario_group)
+        self.scenario_combo = QComboBox()
+        self.scenario_combo.addItems(["(none -- use generic target/motion below)",
+                                       "leo_leo_crosslink", "leo_ground_downlink", "geo_ground"])
+        f.addRow("Preset", self.scenario_combo)
+        note = QLabel("Overrides target motion + link budget with values\nderived from real orbital mechanics.")
+        note.setStyleSheet("color: #888; font-size: 10px;")
+        f.addRow(note)
+        layout.addWidget(scenario_group)
+
         # --- target ---
         target_group = QGroupBox("Target")
         f = QFormLayout(target_group)
@@ -79,12 +91,16 @@ class ConfigPanel(QWidget):
         self.gauss_check = QCheckBox("Gaussian noise")
         self.poisson_check = QCheckBox("Poisson noise")
         self.jitter_check = QCheckBox("Camera jitter")
+        self.jitter_structured_check = QCheckBox("Structured (resonant) jitter")
+        self.turbulence_check = QCheckBox("Atmospheric turbulence (slow, ~10 FPS alone)")
         self.atmo_combo = QComboBox()
         self.atmo_combo.addItems(["clear", "haze", "fog", "rain", "low_light"])
         f.addRow(self.sp_check)
         f.addRow(self.gauss_check)
         f.addRow(self.poisson_check)
         f.addRow(self.jitter_check)
+        f.addRow(self.jitter_structured_check)
+        f.addRow(self.turbulence_check)
         f.addRow("Atmosphere", self.atmo_combo)
         layout.addWidget(dist_group)
 
@@ -116,5 +132,12 @@ class ConfigPanel(QWidget):
         cfg["disturbances"]["noise"]["gaussian"]["enabled"] = self.gauss_check.isChecked()
         cfg["disturbances"]["noise"]["poisson"]["enabled"] = self.poisson_check.isChecked()
         cfg["disturbances"]["jitter"]["enabled"] = self.jitter_check.isChecked()
+        cfg["disturbances"]["jitter"]["structured"] = self.jitter_structured_check.isChecked()
+        cfg["disturbances"]["turbulence"]["enabled"] = self.turbulence_check.isChecked()
         cfg["disturbances"]["atmosphere"]["mode"] = self.atmo_combo.currentText()
+
+        preset_idx = self.scenario_combo.currentIndex()
+        if preset_idx > 0:
+            from simulator.scenario_presets import apply_preset
+            cfg = apply_preset(self.scenario_combo.currentText(), cfg)
         return cfg

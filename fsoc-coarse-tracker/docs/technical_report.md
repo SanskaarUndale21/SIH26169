@@ -340,11 +340,99 @@ occasionally supply the third consistency-building detection sooner, not
 because noise helps tracking; this is a fixed-seed-and-duration artifact
 of the test harness, not a claim that noise improves acquisition.
 
-## 11. Innovation/novelty summary
+## 11. Space-science relevance additions
+
+Tracking accuracy in pixels is an implementation detail; what actually
+matters for FSOC is what that error costs the *link*. This section adds
+the pieces that connect the two, and moves scenario parameters from
+"picked to look reasonable on screen" to "derived from real orbital
+mechanics / atmospheric optics."
+
+### 11.1 Link-margin translation (`simulator/link_budget.py`)
+
+Every run now additionally reports, wherever camera FOV is known
+(simulator mode; not meaningful for a raw benchmark video with no FOV
+metadata):
+
+- `avg/max_angular_error_urad` -- the pixel tracking error converted to
+  microradians via the camera's own deg/pixel scale (co-boresighted
+  assumption between the coarse camera and the laser).
+- `avg/max_pointing_loss_db` -- that angular error's cost on the link, via
+  the standard Gaussian-beam pointing-loss formula `L_dB = 8.686 *
+  (theta/theta_div)^2` against the configured beam divergence
+  (`link_budget.beam_divergence_urad`), clamped at 60dB so an
+  already-enormous loss doesn't report a meaningless four-digit number.
+- `handoff_ready_rate` / `time_to_handoff_ready_sec` -- the fraction of
+  locked time (and time to first reach) the coarse-pointing error dropping
+  inside `link_budget.fine_stage_capture_range_urad`, i.e. the actual
+  criterion for handing off to the fine-pointing stage this project
+  explicitly stops short of building (Section 1). This directly answers
+  "what happens right after coarse alignment succeeds" -- a question this
+  scope naturally invites.
+
+### 11.2 Physically-derived turbulence strength
+
+`simulator/link_budget.py`'s `compute_fried_parameter` integrates the
+Hufnagel-Valley 5/7 Cn^2(h) profile (the standard atmospheric-optics
+turbulence model) along a slant path set by wavelength, path altitude and
+zenith angle, producing a real Fried parameter r0 (metres) instead of an
+arbitrary tuning constant. `fried_parameter_pixel_equivalent` converts
+that to the pixel-space r0 the existing Kolmogorov-phase-screen turbulence
+model (`simulator/disturbances.py`) consumes, via the seeing-angle
+relation `angular_seeing ~= wavelength/r0`. Enabled per-scenario with
+`disturbances.turbulence.physical: true`.
+
+### 11.3 Orbital-mechanics-derived scenario presets (`simulator/orbital.py`, `simulator/scenario_presets.py`)
+
+Three named scenarios, selectable via `scenario_preset` in config (or the
+GUI's scenario dropdown), each deriving its target-motion parameters from
+real orbital formulas rather than a hand-picked radius/speed:
+
+- **`leo_leo_crosslink`**: two ~500km-altitude LEO satellites at a given
+  crosslink range and relative inclination; relative LOS angular rate via
+  `2*v_orbital*sin(di/2) / range`, modeled as straight-line motion at that
+  derived speed.
+- **`leo_ground_downlink`**: a ground station tracking a LEO satellite's
+  overhead pass; peak angular rate `v_orbital / altitude` at zenith
+  crossing, modeled as circular motion with that peak tangential speed.
+- **`geo_ground`**: a GEO satellite's residual station-keeping drift
+  (typically +-0.05deg box) -- angular rate ~6 orders of magnitude below
+  LEO, i.e. effectively stationary; the real tracking challenge here is
+  rejecting jitter/atmosphere, not chasing motion, which is realistic.
+
+Every preset also sets scenario-appropriate `link_budget` values (range,
+wavelength) so the pointing-loss/handoff numbers above mean something
+concrete for that scenario. `cfg["_scenario_derivation"]` carries a
+one-line trace of the formula used, for the demo/report to quote directly
+rather than asserting the numbers are realistic.
+
+### 11.4 Structured (resonant) platform jitter
+
+Real spacecraft jitter is not spectrally flat -- reaction wheels and other
+rotating/reciprocating mechanisms impose narrow-band vibration at their
+operating frequency. `simulator/disturbances.py`'s `StructuredJitterModel`
+drives a per-axis damped second-order resonant filter with white noise,
+producing displacement with a PSD peak at a configurable
+`resonance_hz` instead of independent uniform-random per-frame
+displacement -- closer to what an ADCS/pointing engineer would actually
+simulate for a reaction-wheel-induced disturbance. Enabled per-scenario
+with `disturbances.jitter.structured: true`; the original uniform-random
+model remains the default (matches the spec's literal "up to +-20px/frame"
+wording) and is unaffected when this is off.
+
+## 12. Innovation/novelty summary
 
 - Physically-grounded Kolmogorov/von-Karman turbulence model (FFT phase
-  screen from the real PSD, not a generic blur) tied explicitly to FSOC
-  atmospheric-propagation literature.
+  screen from the real PSD, not a generic blur), with its strength now
+  optionally derived from a real Hufnagel-Valley Cn^2 integration rather
+  than picked by hand (Section 11.2).
+- Link-margin translation and PAT handoff-readiness reporting (Section
+  11.1) -- ties the graded tracking-error metric to what it actually
+  costs the communication link, and to the real coarse-to-fine handoff
+  criterion this project's scope stops short of building.
+- Orbital-mechanics-derived scenario presets (Section 11.3): LEO-LEO
+  crosslink, LEO-ground downlink, and GEO-ground scenarios whose motion
+  parameters trace back to actual orbital velocity/geometry formulas.
 - IMM with finite-difference velocity/turn-rate seeding and curvature-
   aware initial mode-probability biasing, specifically to remove the
   post-lock convergence lag that a naive zero-initialized IMM shows on
@@ -352,11 +440,13 @@ of the test harness, not a claim that noise improves acquisition.
 - Hybrid spiral-then-raster search: fast average-case acquisition via an
   outward spiral, with a raster fallback that provides a genuine bounded-
   worst-case full-screen coverage guarantee.
+- Structured (resonant) platform jitter model (Section 11.4), closer to
+  real reaction-wheel-induced vibration than flat random noise.
 - Shared `PointingStepper` control core used identically by the headless
   runner and the Qt GUI, so there is exactly one implementation of the
   search/PID state machine to reason about and fix.
 
-## 12. Future improvements
+## 13. Future improvements
 
 - A second CT model (or explicit sign-of-curvature detection) to remove
   the residual figure-8 curvature-reversal tracking-error spike.
@@ -376,3 +466,10 @@ of the test harness, not a claim that noise improves acquisition.
   (Section 10's measurement caveat). Running each scenario in a fresh
   subprocess (or reporting `processing_time_per_frame_ms` instead of
   wall-clock FPS in the summary table) would give a cleaner comparison.
+- Full 3D orbital geometry (SGP4 propagation) instead of Section 11.3's
+  closed-form peak-rate approximations, for a pass profile that eases in
+  from the horizon rather than only matching the zenith-crossing peak.
+- Cache/evolve the turbulence phase screen across frames (already noted
+  above) would also make `turbulence.physical: true` viable in real time,
+  since the physically-derived r0 tends toward the stronger-turbulence
+  end of the model's range for slant paths.

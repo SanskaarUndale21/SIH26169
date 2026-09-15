@@ -21,6 +21,8 @@ from perception.pipeline import PerceptionTrackingPipeline
 from perf_logging.performance_logger import RunMetrics, write_run_log
 from simulator.camera_model import CameraModel, PTZActuator
 from simulator.disturbances import DisturbanceConfig
+from simulator.link_budget import (LinkBudgetConfig, is_handoff_ready, pointing_loss_db,
+                                    px_error_to_angular_error)
 from simulator.renderer import SimulatorEngine
 from simulator.scene import Scene
 
@@ -104,6 +106,7 @@ class MainWindow(QMainWindow):
 
         self.pipeline = None
         self.stepper = PointingStepper(cfg, self.camera) if self.camera is not None else None
+        self.link_cfg = LinkBudgetConfig.from_config(cfg)
         self.metrics = RunMetrics()
         self.config = cfg
 
@@ -136,7 +139,15 @@ class MainWindow(QMainWindow):
                 px, py = telemetry.predicted_px
                 tracking_error = min(((px - gx) ** 2 + (py - gy) ** 2) ** 0.5 for gx, gy in gts)
 
-        self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, 0.0)
+        angular_error = link_loss = None
+        handoff_ready = None
+        if tracking_error is not None and frame.fov_deg is not None:
+            angular_error = px_error_to_angular_error(tracking_error, frame.fov_deg[0], frame.image.shape[1])
+            link_loss = pointing_loss_db(angular_error, self.link_cfg.beam_divergence_urad)
+            handoff_ready = is_handoff_ready(angular_error, self.link_cfg.fine_stage_capture_range_urad)
+        self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, 0.0,
+                                   angular_error_urad=angular_error, link_loss_db=link_loss,
+                                   handoff_ready=handoff_ready)
         self.video_panel.show_frame(frame.image, telemetry)
         self.dashboard_panel.update_from_telemetry(telemetry, tracking_error)
         self.dashboard_panel.update_metrics_readout(self.metrics.finalize())
