@@ -64,6 +64,7 @@ class KalmanModel:
         Qm = self.process_noise(dt)
         self.x = F @ self.x
         self.P = F @ self.P @ F.T + Qm
+        self.P = 0.5 * (self.P + self.P.T)  # re-symmetrize against float drift
 
     def update(self, z: Optional[np.ndarray], R: np.ndarray) -> float:
         """Returns the measurement likelihood (for mode-prob update); if
@@ -79,9 +80,27 @@ class KalmanModel:
         K = self.P @ H.T @ np.linalg.inv(S)
         self.x = self.x + K @ y
         self.P = (np.eye(STATE_DIM) - K @ H) @ self.P
+        self.P = 0.5 * (self.P + self.P.T)  # re-symmetrize against float drift
         det_s = max(np.linalg.det(S), 1e-9)
-        likelihood = math.exp(-0.5 * float(y.T @ np.linalg.inv(S) @ y)) / math.sqrt((2 * math.pi) ** MEAS_DIM * det_s)
-        return max(likelihood, 1e-12)
+        # Mahalanobis term can numerically go slightly negative for an
+        # ill-conditioned S (e.g. right after an external state correction
+        # like the pipeline's one-time velocity/omega seed leaves P
+        # briefly inconsistent with x), which would make the exponent
+        # large and positive and overflow math.exp. Clip defensively --
+        # the exact likelihood value doesn't matter once it's this far in
+        # the tail, only that it comes out as "very unlikely" rather than
+        # crashing the run.
+        # Should be non-negative for a valid (positive-definite) S; clamp
+        # defensively since an ill-conditioned S can make it numerically
+        # negative, which would otherwise flip the sign below and send a
+        # large *positive* exponent into math.exp (this was the actual
+        # cause of the OverflowError this comment replaces -- a lower-
+        # bound-only clip on the exponent doesn't help when the sign
+        # itself is wrong).
+        mahalanobis = max(float(y.T @ np.linalg.inv(S) @ y), 0.0)
+        exponent = max(-0.5 * mahalanobis, -700.0)
+        likelihood = math.exp(exponent) / math.sqrt((2 * math.pi) ** MEAS_DIM * det_s)
+        return max(min(likelihood, 1e300), 1e-12)
 
 
 def _ct_transition_matrix(omega: float, dt: float) -> np.ndarray:
@@ -125,16 +144,26 @@ class IMMTracker:
     MODEL_NAMES = ("cv", "ct", "rw")
 
     def __init__(self, cfg: IMMConfig, init_pos: Tuple[float, float],
-                 init_vel: Tuple[float, float] = (0.0, 0.0)):
-        """init_vel: optional finite-difference velocity estimate from the
-        two most recent raw detections (see pipeline.py). Starting the
-        filter with a real velocity guess instead of zero removes most of
-        the several-frame convergence lag that would otherwise show up as
-        a large transient tracking-error spike right after lock is first
-        acquired on a fast-moving target -- exactly the ≤10px-while-locked
-        requirement's worst case (Section 10)."""
+                 init_vel: Tuple[float, float] = (0.0, 0.0),
+                 init_omega: float = 0.0):
+        """init_vel/init_omega: optional finite-difference velocity/turn-
+        rate estimate from the raw detections just before lock (see
+        pipeline.py). Starting the filter with real guesses instead of
+        zero removes most of the several-frame convergence lag that would
+        otherwise show up as a large transient tracking-error spike right
+        after lock on a fast-moving target -- exactly the <=10px-while-
+        locked requirement's worst case (Section 10).
+
+        A nonzero init_omega also biases the initial mode probabilities
+        toward the CT model: seeding CT's state correctly doesn't help
+        much if the *combined* (probability-weighted) estimate the
+        pointing controller actually uses still starts 1/3-1/3-1/3 CV/CT/
+        RW, since CV assumes zero turn and drags the blend off the curve
+        until CT's likelihood wins out over several frames. Starting the
+        weights already favouring CT when the seed data itself shows
+        curvature removes that residual lag."""
         self.cfg = cfg
-        x0 = np.array([init_pos[0], init_pos[1], init_vel[0], init_vel[1], 0.0])
+        x0 = np.array([init_pos[0], init_pos[1], init_vel[0], init_vel[1], init_omega])
         P0 = np.diag([25.0, 25.0, 100.0, 100.0, 0.05])
         self.models: List[KalmanModel] = [
             KalmanModel("cv", x0.copy(), P0.copy(), cfg.q_cv, is_ct=False),
@@ -142,7 +171,10 @@ class IMMTracker:
             KalmanModel("rw", x0.copy(), P0.copy(), cfg.q_rw, is_ct=False),
         ]
         n = len(self.models)
-        self.mode_probs = np.ones(n) / n
+        if abs(init_omega) > 0.15:  # ~8.6 deg/s: seed data shows real curvature
+            self.mode_probs = np.array([0.15, 0.70, 0.15])
+        else:
+            self.mode_probs = np.ones(n) / n
         # transition probability matrix: high self-persistence, small
         # cross-switch probability (standard IMM Markov-chain design)
         p_stay = 0.92

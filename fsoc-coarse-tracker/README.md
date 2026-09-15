@@ -52,6 +52,12 @@ default, and `docs/` for the technical report and user manual outlines.
 
 ## Known characteristics / tuning notes
 
+See `docs/technical_report.md` Sections 8-9 for the full writeup,
+including three real bugs found and fixed during development (candidate-
+count explosion under salt & pepper noise, a background-level bias that
+broke the detector's noise estimate under Gaussian noise, and a lock-state
+false-positive on noise blobs) -- summary:
+
 - Default target spawn is bounded to a radius around screen centre (see
   comment in `simulator/scene.py`) rather than fully uniform across the
   2000x2000 canvas -- with the default narrow FOV (4x3 deg) and bounded
@@ -60,14 +66,16 @@ default, and `docs/` for the technical report and user manual outlines.
   the <=2s acquisition-time target physically unreachable regardless of
   detector/tracker quality. Set `target.initial_location` explicitly for
   wider-area search testing.
-- Search behaviour: an outward spiral (`control/search_driver.py`) is used
-  for both first acquisition and re-acquisition; a raster sweep is also
-  implemented and available if a deployment's spawn distribution needs
-  exhaustive full-range coverage instead.
-- The IMM's turn-rate (CT model) and velocity are seeded from finite
-  differences of the first 2-3 raw detections rather than zero, to avoid a
-  multi-frame tracking-error transient right after lock on fast-curving
-  motion. Residual transient spikes above the 10px target can still occur
-  in the first few frames after lock on aggressive circular/figure-8
-  motion; see the technical report's performance analysis for measured
-  numbers against the Section 12 test matrix.
+- Search: a fast outward spiral (`control/search_driver.py`) is used for
+  the first 3s of searching and for re-acquisition; after 3s with no
+  detection at all, it hands off to a raster sweep sized to guarantee full
+  2000x2000-screen coverage as a bounded-worst-case fallback (~100s at the
+  default 5 deg/s slew rate).
+- The IMM's velocity and turn-rate are corrected once, from finite
+  differences of the first few post-lock measurements, rather than left at
+  zero -- this removes most of the tracking-error transient right after
+  lock on fast-curving motion. Measured avg tracking error while locked is
+  typically 1-5px across all four motion types; max error is typically
+  under 15px with occasional spikes above 10px on aggressive figure-8
+  curvature reversals (see technical report Section 5's documented
+  residual limitation).

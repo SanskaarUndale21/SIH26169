@@ -11,8 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from control.actuator_interface import Actuator, NullActuator, SimulatorActuator
-from control.pid_controller import PIDPointingController
-from control.search_driver import RasterSweepDriver, SpiralSweepDriver
+from control.stepper import PointingStepper
 from perf_logging.performance_logger import RunMetrics, write_run_log
 from perception.frame_source import FrameSource
 from perception.pipeline import PerceptionTrackingPipeline, Telemetry
@@ -38,25 +37,15 @@ class TrackingRunner:
         self.frame_source = frame_source
         self.camera = camera
         self.pipeline: Optional[PerceptionTrackingPipeline] = None
-        self.controller = PIDPointingController(config)
+        # PointingStepper owns the PID controller + hybrid spiral/raster
+        # search logic; shared with gui/main_window.py so both entry
+        # points drive the PTZ identically (see control/stepper.py).
+        self.stepper = PointingStepper(config, camera) if camera is not None else None
         self.actuator: Actuator = SimulatorActuator(ptz) if ptz is not None else NullActuator()
         self.ground_truth_fn = ground_truth_fn
         self.metrics = RunMetrics()
         self.telemetry_log: List[Telemetry] = []
         self.on_telemetry: Optional[Callable[[Telemetry, "any"], None]] = None
-
-        max_pan = config.get("ptz", {}).get("max_pan_speed_deg_s", 5.0)
-        max_tilt = config.get("ptz", {}).get("max_tilt_speed_deg_s", 5.0)
-        # Initial acquisition uses an outward spiral centred on the starting
-        # boresight (fast for the bounded-radius default spawn -- see
-        # scene.py); reacquisition uses a separate spiral instance centred
-        # on the IMM's last known position. A raster driver is also
-        # available (control/search_driver.py) for exhaustive full-range
-        # coverage if a deployment's target spawn distribution needs it.
-        self.raster_search = RasterSweepDriver(max_pan, max_tilt)
-        self.initial_search = SpiralSweepDriver(min(max_pan, max_tilt))
-        self.spiral_search = SpiralSweepDriver(min(max_pan, max_tilt))
-        self._prev_lock_state: Optional[str] = None
 
     def run(self, max_frames: Optional[int] = None, max_duration_s: Optional[float] = None,
             stop_flag: Optional[Callable[[], bool]] = None) -> RunResult:
@@ -73,26 +62,12 @@ class TrackingRunner:
             t0 = time.perf_counter()
             telemetry = self.pipeline.process(frame)
 
-            pan_rate = tilt_rate = 0.0
-            if self.camera is not None and frame.fov_deg is not None:
+            if self.stepper is not None and frame.fov_deg is not None:
                 dt_ctrl = 1.0 / max(self.frame_source.get_fps(), 1.0)
-                if telemetry.lock_state in ("locked", "acquiring"):
-                    px_per_deg_x = self.camera.px_per_deg_x
-                    px_per_deg_y = self.camera.px_per_deg_y
-                    err_x_deg = (telemetry.predicted_px[0] - frame.image.shape[1] / 2) / px_per_deg_x
-                    err_y_deg = (telemetry.predicted_px[1] - frame.image.shape[0] / 2) / px_per_deg_y
-                    pan_rate, tilt_rate = self.controller.compute(err_x_deg, err_y_deg, dt_ctrl)
-                elif telemetry.lock_state == "reacquiring":
-                    if self._prev_lock_state != "reacquiring":
-                        self.spiral_search.recenter()
-                    pan_rate, tilt_rate = self.spiral_search.next_rate(dt_ctrl)
-                    self.controller.reset()
-                else:  # searching
-                    pan_rate, tilt_rate = self.initial_search.next_rate(dt_ctrl)
-                    self.controller.reset()
+                pan_rate, tilt_rate = self.stepper.step(telemetry, frame.image.shape[1],
+                                                         frame.image.shape[0], dt_ctrl)
                 self.actuator.command(pan_rate, tilt_rate, dt_ctrl)
                 telemetry.pointing_command_deg = (pan_rate, tilt_rate)
-                self._prev_lock_state = telemetry.lock_state
 
             proc_ms = (time.perf_counter() - t0) * 1000.0
 

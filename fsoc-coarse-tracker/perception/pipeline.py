@@ -11,6 +11,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Literal, Optional, Tuple
 
+import numpy as np
+
 from perception.detector import Candidate, DetectorConfig, detect, select_best_candidate
 from perception.frame_source import Frame
 from perception.imm_tracker import IMMConfig, IMMTracker
@@ -56,7 +58,8 @@ class PerceptionTrackingPipeline:
                                            max_radius=max(frame_width, frame_height) / 2)
         self._last_t: Optional[float] = None
         self.gate_radius = 60.0
-        self._pre_lock_history: deque = deque(maxlen=3)  # (t, x, y) of raw detections before a track exists
+        self._recent_history: deque = deque(maxlen=3)  # (t, x, y) of the last few raw detections
+        self._velocity_seeded = False  # have we already done the one-time finite-diff velocity/omega seed?
 
     def process(self, frame: Frame) -> Telemetry:
         dt = 1 / 30.0 if self._last_t is None else max(1e-3, frame.timestamp - self._last_t)
@@ -65,7 +68,14 @@ class PerceptionTrackingPipeline:
         candidates = detect(frame.image, self.detector_cfg)
 
         predicted = self.tracker.position if self.tracker is not None else None
-        gate = self.gate_radius if self.lock_sm.state == "locked" else max(self.frame_width, self.frame_height)
+        # Gate tightly around the IMM's prediction whenever a track exists
+        # (acquiring, locked, or reacquiring-with-a-stale-track) -- only a
+        # pure "never seen it yet" search has no prediction to trust and
+        # needs the wide, whole-frame gate. Gating loosely throughout
+        # "acquiring" (an earlier version of this pipeline did) let the
+        # confirm-frames counter advance on a different noise blob each
+        # frame instead of the same physical target.
+        gate = self.gate_radius if predicted is not None else max(self.frame_width, self.frame_height)
         best = select_best_candidate(candidates, predicted, gate_radius=gate)
 
         if best is None and self.lock_sm.state in ("searching", "reacquiring") and candidates:
@@ -77,38 +87,71 @@ class PerceptionTrackingPipeline:
         detected = best is not None
         measurement = (best.x, best.y) if best else None
 
-        if self.tracker is None and detected:
-            hist = self._pre_lock_history
-            # only use recent, contiguous history (stale gaps -> restart)
+        # Recent-detection history feeds a one-time finite-difference
+        # velocity/turn-rate seed (below) -- it is NOT used to gate lock-
+        # state confirmation on pixel-distance consistency between
+        # consecutive points. An earlier version tried that (reject a
+        # "too fast" jump between consecutive pre-lock detections), but
+        # while the search is actively sweeping, the *camera itself* is
+        # slewing at up to the PTZ speed limit -- which in camera-frame
+        # pixels can dwarf any real target's own motion -- so a stationary
+        # target looks like it's "jumping" just from the boresight moving
+        # under it. Perception deliberately has no dependency on the
+        # simulator/actuator to separate that out. Robustness against
+        # locking onto noise instead comes from: the detector's target-
+        # size-derived blob filter, the nonzero background level fixing
+        # the noise-sigma estimate (see technical report Sec. 9.2), and
+        # gating tightly around the IMM's own prediction from the very
+        # first raw detection onward (the tracker is created immediately
+        # below, not after a multi-frame wait).
+        hist = self._recent_history
+        if detected:
             if hist and (frame.timestamp - hist[-1][0]) > 1.0:
                 hist.clear()
+                self._velocity_seeded = False
             hist.append((frame.timestamp, measurement[0], measurement[1]))
+        else:
+            hist.clear()
+            self._velocity_seeded = False
 
-            if len(hist) >= 3:
-                # Three consecutive raw detections: seed both velocity and
-                # turn-rate (omega) directly from finite differences instead
-                # of leaving the CT model's omega at 0 and waiting for it to
-                # implicitly correlate with position residuals over ~1s of
-                # measurement updates -- that implicit convergence was
-                # previously producing a large (~35px), multi-frame
-                # tracking-error spike right after lock on curving motion,
-                # which would fail Section 10's <=10px-while-locked target.
-                (t0, x0, y0), (t1, x1, y1), (t2, x2, y2) = hist
-                dt1, dt2 = t1 - t0, t2 - t1
-                v1 = ((x1 - x0) / dt1, (y1 - y0) / dt1)
-                v2 = ((x2 - x1) / dt2, (y2 - y1) / dt2)
-                omega = _turn_rate(v1, v2, dt2)
-                self.tracker = IMMTracker(self.imm_cfg, measurement, v2)
-                self.tracker.models[1].x[4] = omega  # index 1 = CT model
-            elif len(hist) == 2:
-                (t0, x0, y0), (t1, x1, y1) = hist
-                dt_meas = t1 - t0
-                init_vel = ((x1 - x0) / dt_meas, (y1 - y0) / dt_meas)
-                self.tracker = IMMTracker(self.imm_cfg, measurement, init_vel)
-            else:
-                # first-ever raw detection: not enough history yet -- wait.
-                detected = False
-                measurement = None
+        if self.tracker is None and detected:
+            # Create the tracker immediately on the very first raw
+            # detection, zero-velocity, so a real target is picked up (and
+            # the search stops chasing away from it, since select_best_
+            # candidate above will gate tightly around this prediction
+            # starting next frame) from frame one, rather than waiting
+            # several frames to estimate velocity first.
+            self.tracker = IMMTracker(self.imm_cfg, measurement)
+        elif self.tracker is not None and detected and not self._velocity_seeded and len(hist) >= 3:
+            # One-time correction, once 3 consistent (now IMM-gated, so
+            # trustworthy) measurements have accumulated: overwrite the
+            # velocity/turn-rate the filter would otherwise have to
+            # converge onto implicitly over ~1s of updates. This is what
+            # keeps the tracking-error transient right after lock small on
+            # fast-curving motion (Section 10's <=10px-while-locked
+            # target) without needing to delay track creation itself.
+            (t0, x0, y0), (t1, x1, y1), (t2, x2, y2) = hist
+            dt1, dt2 = t1 - t0, t2 - t1
+            v1 = ((x1 - x0) / dt1, (y1 - y0) / dt1)
+            v2 = ((x2 - x1) / dt2, (y2 - y1) / dt2)
+            omega = _turn_rate(v1, v2, dt2)
+            for m in self.tracker.models:
+                m.x[2], m.x[3] = v2
+                # Re-inflate the velocity covariance after directly
+                # overwriting the state: leaving P as the (small, post-
+                # several-Kalman-updates) value it had converged to would
+                # make the filter overconfident about a state that just
+                # jumped externally, which was observed to occasionally
+                # produce an ill-conditioned innovation covariance a few
+                # frames later (a NumPy OverflowError in the mode-
+                # probability likelihood calculation).
+                m.P[2, 2] = m.P[3, 3] = max(m.P[2, 2], 100.0)
+                m.P[0, 2] = m.P[2, 0] = m.P[1, 3] = m.P[3, 1] = 0.0
+            self.tracker.models[1].x[4] = omega  # index 1 = CT model
+            self.tracker.models[1].P[4, 4] = max(self.tracker.models[1].P[4, 4], 0.05)
+            if abs(omega) > 0.15:
+                self.tracker.mode_probs = np.array([0.15, 0.70, 0.15])
+            self._velocity_seeded = True
 
         if self.tracker is not None:
             self.tracker.step(dt, measurement)

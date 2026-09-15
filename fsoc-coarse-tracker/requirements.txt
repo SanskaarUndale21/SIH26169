@@ -6,3 +6,8 @@ PySide6>=6.6
 pyqtgraph>=0.13
 pytest>=8.0
 pyinstaller>=6.6
+
+# Optional: only needed for perception/cnn_filter.py (Section 8.4's
+# optional learned false-positive filter). Everything else works with
+# torch absent -- cnn_filter.py degrades to disabled/passthrough.
+# torch>=2.0

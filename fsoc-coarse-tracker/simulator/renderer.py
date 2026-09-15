@@ -14,13 +14,28 @@ from simulator.scene import Scene
 
 class SimulatorEngine:
     def __init__(self, scene: Scene, camera: CameraModel, disturbance_cfg: DisturbanceConfig,
-                 platform_motion: PlatformMotionDrift | None = None, seed: int = 0):
+                 platform_motion: PlatformMotionDrift | None = None, seed: int = 0,
+                 background_level: int = 20):
+        """background_level: dark-current/bias floor the rendered image
+        starts from before disturbances are injected, instead of pure 0.
+        Every real focal-plane-array sensor has a nonzero black level;
+        without it, additive Gaussian noise on a 0 background is a
+        half-Gaussian (clipped at 0 for the ~50% of samples that would go
+        negative), which biases a median/MAD-based robust background
+        estimator (perception/detector.py) toward reading near-zero noise
+        even when real injected sigma is large -- that mismatch let
+        thousands of noise pixels look like valid detections and both
+        tanked accuracy and FPS under the Gaussian-noise disturbance.
+        A modest nonzero floor keeps the noise distribution symmetric
+        (until it saturates near 255) so the robust estimator reads the
+        true noise level."""
         self.scene = scene
         self.camera = camera
         self.disturbance_cfg = disturbance_cfg
         self.platform_motion = platform_motion
         self.rng = np.random.default_rng(seed)
         self.t = 0.0
+        self.background_level = background_level
 
     def step(self, dt: float):
         self.t += dt
@@ -34,7 +49,7 @@ class SimulatorEngine:
         camera pixel coords) -- the ground truth is for the Simulator's own
         benchmark logging only, never fed to Perception+Tracking."""
         w, h = self.camera.width_px, self.camera.height_px
-        img = np.zeros((h, w), dtype=np.uint8)
+        img = np.full((h, w), self.background_level, dtype=np.uint8)
         gt_positions = []
         for target in self.scene.targets:
             xt, yt = target.position(self.t)
@@ -42,7 +57,14 @@ class SimulatorEngine:
             if self.camera.is_in_fov(u, v):
                 gt_positions.append((u, v))
                 _draw_target(img, u, v, target.size_px, target.shape)
-        img, _ = apply_disturbances(img, self.disturbance_cfg, self.rng)
+        img, info = apply_disturbances(img, self.disturbance_cfg, self.rng)
+        # Jitter shifts the rendered image content itself (sensor-level
+        # shake), so the target's *reported* ground-truth position must
+        # shift with it too, or every jittered frame would show a spurious
+        # ~jitter-magnitude "tracking error" even though the detector
+        # correctly found the target exactly where it was actually drawn.
+        if "jitter_dx" in info:
+            gt_positions = [(u + info["jitter_dx"], v + info["jitter_dy"]) for u, v in gt_positions]
         return img, gt_positions
 
 

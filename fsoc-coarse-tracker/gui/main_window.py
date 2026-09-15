@@ -12,8 +12,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QMainWindow, QMessageBox, QPushButto
                                 QSplitter, QStatusBar, QVBoxLayout, QWidget)
 
 from control.actuator_interface import NullActuator, SimulatorActuator
-from control.pid_controller import PIDPointingController
-from control.search_driver import RasterSweepDriver, SpiralSweepDriver
+from control.stepper import PointingStepper
 from gui.config_panel import ConfigPanel
 from gui.dashboard_panel import DashboardPanel
 from gui.video_panel import VideoPanel
@@ -71,14 +70,10 @@ class MainWindow(QMainWindow):
     def _reset_runtime_state(self):
         self.frame_source = None
         self.pipeline = None
-        self.controller = None
+        self.stepper = None
         self.actuator = None
         self.camera = None
-        self.raster_search = RasterSweepDriver(5.0, 5.0)
-        self.initial_search = SpiralSweepDriver(5.0)
-        self.spiral_search = SpiralSweepDriver(5.0)
         self.metrics = RunMetrics()
-        self.prev_lock_state = None
 
     def start_run(self):
         cfg = self.config_panel.build_config()
@@ -103,17 +98,13 @@ class MainWindow(QMainWindow):
                 engine = SimulatorEngine(scene, self.camera, dcfg)
                 self.frame_source = SimulatorFrameSource(engine, fps=cam_cfg["update_rate_hz"])
                 self.actuator = SimulatorActuator(ptz)
-                self.raster_search = RasterSweepDriver(cfg["ptz"]["max_pan_speed_deg_s"], cfg["ptz"]["max_tilt_speed_deg_s"])
-                self.initial_search = SpiralSweepDriver(min(cfg["ptz"]["max_pan_speed_deg_s"], cfg["ptz"]["max_tilt_speed_deg_s"]))
-                self.spiral_search = SpiralSweepDriver(min(cfg["ptz"]["max_pan_speed_deg_s"], cfg["ptz"]["max_tilt_speed_deg_s"]))
         except Exception as exc:
             QMessageBox.critical(self, "Error starting run", str(exc))
             return
 
         self.pipeline = None
-        self.controller = PIDPointingController(cfg)
+        self.stepper = PointingStepper(cfg, self.camera) if self.camera is not None else None
         self.metrics = RunMetrics()
-        self.prev_lock_state = None
         self.config = cfg
 
         self.timer.start(int(1000 / max(cfg["camera"]["update_rate_hz"], 1)))
@@ -131,23 +122,12 @@ class MainWindow(QMainWindow):
 
         telemetry = self.pipeline.process(frame)
 
-        if self.camera is not None and frame.fov_deg is not None:
+        if self.stepper is not None and frame.fov_deg is not None:
             dt_ctrl = 1.0 / max(self.frame_source.get_fps(), 1.0)
-            if telemetry.lock_state in ("locked", "acquiring"):
-                err_x_deg = (telemetry.predicted_px[0] - frame.image.shape[1] / 2) / self.camera.px_per_deg_x
-                err_y_deg = (telemetry.predicted_px[1] - frame.image.shape[0] / 2) / self.camera.px_per_deg_y
-                pan_rate, tilt_rate = self.controller.compute(err_x_deg, err_y_deg, dt_ctrl)
-            elif telemetry.lock_state == "reacquiring":
-                if self.prev_lock_state != "reacquiring":
-                    self.spiral_search.recenter()
-                pan_rate, tilt_rate = self.spiral_search.next_rate(dt_ctrl)
-                self.controller.reset()
-            else:
-                pan_rate, tilt_rate = self.initial_search.next_rate(dt_ctrl)
-                self.controller.reset()
+            pan_rate, tilt_rate = self.stepper.step(telemetry, frame.image.shape[1],
+                                                      frame.image.shape[0], dt_ctrl)
             self.actuator.command(pan_rate, tilt_rate, dt_ctrl)
             telemetry.pointing_command_deg = (pan_rate, tilt_rate)
-            self.prev_lock_state = telemetry.lock_state
 
         tracking_error = None
         if self.frame_source.is_live():

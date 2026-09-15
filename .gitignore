@@ -7,8 +7,11 @@ dist/
 build/
 .pytest_cache/
 **/data/sample_videos/*.mp4
+**/data/*.pt
+**/data/*.npz
 *.log
 **/logs/*.json
 **/logs/*.csv
 .claude/
+*.spec
 26169.pdf

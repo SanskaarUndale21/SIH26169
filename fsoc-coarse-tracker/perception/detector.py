@@ -34,12 +34,26 @@ class DetectorConfig:
     @classmethod
     def from_config(cls, cfg: dict) -> "DetectorConfig":
         d = cfg.get("detector", {})
+        # Default min/max blob area window is derived from the configured
+        # target size (Section 3, param 10) rather than fixed generic
+        # constants: the target's true pixel footprint is known ahead of
+        # time (it's a config parameter, not something the detector has to
+        # discover), so tying the size filter to it directly rejects noise
+        # blobs of the wrong scale instead of accepting anything from 4 to
+        # 400px. This matters most under salt & pepper / Gaussian noise,
+        # where a loose generic window otherwise lets through enough
+        # noise-sized candidates to occasionally satisfy the lock-state
+        # machine's confirm-frames requirement on pure noise.
+        target_size = cfg.get("target", {}).get("size_px", [10, 10])
+        nominal_area = target_size[0] * target_size[1]
+        default_min = max(4, int(nominal_area * 0.35))
+        default_max = int(nominal_area * 3.0)
         return cls(
             dog_sigma1=d.get("dog_sigma1", 1.0),
             dog_sigma2=d.get("dog_sigma2", 3.0),
             threshold_k=d.get("threshold_k", 4.0),
-            min_blob_px=d.get("min_blob_px", 4),
-            max_blob_px=d.get("max_blob_px", 400),
+            min_blob_px=d.get("min_blob_px", default_min),
+            max_blob_px=d.get("max_blob_px", default_max),
         )
 
 
@@ -72,6 +86,17 @@ def detect(img: np.ndarray, cfg: DetectorConfig) -> List[Candidate]:
     select_best_candidate)."""
     if img.ndim == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # A light 3x3 median pre-filter is the standard defense against
+    # impulsive salt & pepper noise: it kills isolated single/few-pixel
+    # outliers while barely touching a real 5-20px target blob. Without
+    # it, at the spec's ~10% salt & pepper density, thousands of isolated
+    # bright noise pixels each produce a DoG response comparable to a real
+    # point source (DoG's sigma1=1px is the same scale as a single noise
+    # pixel), which both tanks accuracy and -- with thousands of surviving
+    # candidates per frame -- tanks throughput well below the 20 FPS
+    # target (Section 10). Cheap (~1-2ms at 640x480) and always applied
+    # since it doesn't hurt the clean-image case.
+    img = cv2.medianBlur(img, 3)
     _, sigma_local = robust_background_stats(img)
     dog = dog_response(img, cfg.dog_sigma1, cfg.dog_sigma2)
     thresh = cfg.threshold_k * sigma_local

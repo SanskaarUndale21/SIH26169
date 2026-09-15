@@ -96,7 +96,7 @@ def evaluate(metrics: dict) -> dict:
     return results
 
 
-def run_matrix(duration_frames: int = 150, seed: int = 0):
+def run_matrix(duration_frames: int = 300, seed: int = 42):
     cfg_path = os.path.join(os.path.dirname(__file__), "..", "config", "default_config.yaml")
     with open(cfg_path) as f:
         base_cfg = yaml.safe_load(f)
