@@ -1,0 +1,70 @@
+# Default configuration for the FSOC coarse-alignment tracker.
+# Every parameter from the problem-statement spec (screen/camera/target/PTZ/
+# disturbances) is here with the suggested default value. All are overridable
+# from the GUI config panel or by passing a different YAML file.
+
+screen:
+  width: 2000
+  height: 2000
+
+camera:
+  type: mono          # mono | colour
+  resolution: [640, 480]
+  fov_deg: [4.0, 3.0]
+  update_rate_hz: 30
+  initial_position: center   # world (x,y) camera boresight starts at screen centre
+
+target:
+  type: beacon_spot
+  num_targets: 1
+  shape: square        # square | circle
+  size_px: [10, 10]
+  initial_location: random   # random | [x, y]
+  motion: straight_line       # straight_line | circular | figure8 | random
+  motion_params:
+    straight_line: {speed_px_s: 60, angle_deg: 30}
+    circular: {radius_px: 300, period_s: 20}
+    figure8: {A_px: 300, B_px: 200, period_s: 24}
+    random: {speed_px_s: 30, theta_std_deg: 25}
+
+ptz:
+  max_pan_speed_deg_s: 5.0
+  max_tilt_speed_deg_s: 5.0
+  update_interval_hz: 20
+
+disturbances:
+  noise:
+    salt_pepper: {enabled: false, amount: 0.10}
+    gaussian: {enabled: false, sigma: 10}
+    poisson: {enabled: false}
+  max_noise_std_px: 20
+  jitter: {enabled: false, max_px: 20}
+  atmosphere:
+    mode: clear   # clear | haze | fog | rain | low_light
+  platform_motion:
+    enabled: false
+    mode: linear   # linear | circular | random | spiral | figure8
+    max_px_frame: 20
+
+detector:
+  dog_sigma1: 1.0
+  dog_sigma2: 3.0
+  threshold_k: 4.0
+  min_blob_px: 4
+  max_blob_px: 400
+
+tracker:
+  process_noise_cv: 4.0
+  process_noise_ct: 4.0
+  process_noise_rw: 50.0
+  measurement_noise: 4.0
+  acquiring_confirm_frames: 4
+  reacquire_timeout_frames: 30
+
+control:
+  pid:
+    pan: {kp: 2.5, ki: 0.15, kd: 0.35}
+    tilt: {kp: 2.5, ki: 0.15, kd: 0.35}
+
+logging:
+  output_dir: logs

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+**/data/sample_videos/*.mp4
+*.log
+**/logs/*.json
+**/logs/*.csv
+.claude/
+26169.pdf
