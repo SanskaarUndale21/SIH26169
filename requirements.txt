@@ -8,11 +8,13 @@ PyOpenGL>=3.1          # required by pyqtgraph.opengl -- gui/view3d_panel.py's 3
 pytest>=8.0
 pyinstaller>=6.6
 
-# Optional standalone web dashboard (web/dashboard_server.py) -- a
-# read-only results viewer + 3D replay, fully decoupled from the tracker
-# (see that file's docstring). Not required to run main.py.
+# Web dashboard + live control (web/dashboard_server.py, web/live_engine.py):
+# results browsing, 3D replay, AND a full live simulation control surface
+# (web/control_page.py). Not required to run main.py directly.
 fastapi>=0.110
 uvicorn>=0.29
+websockets>=12.0       # live telemetry stream for /control's live 3D view
+python-multipart>=0.0.9  # video-file upload on /control
 
 # Optional: only needed for perception/cnn_filter.py (Section 8.4's
 # optional learned false-positive filter). Everything else works with

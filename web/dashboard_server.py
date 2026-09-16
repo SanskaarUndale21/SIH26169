@@ -1,13 +1,15 @@
-"""Standalone, read-only web dashboard for browsing past run logs.
+"""Web dashboard: browse past run logs/3D replays, AND drive a real live
+simulation run from the browser (web/live_engine.py) -- the desktop GUI
+and this page are two independent front-ends over the same real engine
+code (control/run_loop.TrackingRunner, config/param_schema.py), not two
+different implementations that could drift apart or disagree.
 
-Deliberately decoupled from the tracking engine: this only reads the JSON
-logs already written by perf_logging/performance_logger.py. It has no
-import of simulator/perception/control/gui, no socket back into a live
-run, and no ability to start/stop/configure anything. If this process is
-never started, or crashes, or the browser tab is never opened, the actual
-tracker (main.py) is completely unaffected -- this is a "look at our
-results" viewer, not a second control surface, and it is not part of the
-judged demo's critical path.
+This does import simulator/perception/control now (via live_engine.py),
+a deliberate trade made when the product's scope grew to "the web UI is
+also a full control surface" -- earlier revisions of this file kept it
+strictly read-only/decoupled for demo-day reliability; that guarantee no
+longer holds for the /control page specifically. The /view/{name} replay
+and /api/runs browsing endpoints remain pure log readers regardless.
 
 Run with:
     python web/dashboard_server.py
@@ -15,12 +17,14 @@ then open http://127.0.0.1:8420/
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -28,11 +32,23 @@ APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 LOGS_DIR = REPO_ROOT / "logs"
 STATIC_DIR = APP_DIR / "static"
+UPLOAD_DIR = REPO_ROOT / "data" / "uploaded_videos"
 
-app = FastAPI(title="FSOC Tracker -- Results Dashboard (read-only)")
-# Three.js is served from a local file (web/static/), not a CDN, so the
-# 3D replay works with no internet connection during a demo.
+sys.path.insert(0, str(REPO_ROOT))  # so live_engine's `from control...` imports resolve
+from web.live_engine import engine as live_engine  # noqa: E402
+from config.param_schema import schema_as_json, resolve_ui_values, apply_scenario_preset_if_set  # noqa: E402
+
+app = FastAPI(title="FSOC Tracker -- Dashboard & Live Control")
+# Three.js is served from a local file (web/static/), not a CDN, so both
+# the replay and live-control 3D views work with no internet connection
+# during a demo.
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _load_default_config() -> dict:
+    import yaml
+    with open(REPO_ROOT / "config" / "default_config.yaml") as f:
+        return yaml.safe_load(f)
 
 
 def _safe_run_name(run_name: str) -> str:
@@ -95,6 +111,93 @@ def api_run_frames(run_name: str) -> JSONResponse:
     return JSONResponse(records)
 
 
+# ---------------------------------------------------------------------------
+# Live control: real simulation runs started/stopped/configured from the
+# browser, via web/live_engine.py's LiveEngine (the same real engine code
+# gui/main_window.py drives, not a reimplementation).
+# ---------------------------------------------------------------------------
+
+@app.get("/api/config/schema")
+def api_config_schema() -> JSONResponse:
+    """The single parameter schema both this page and the desktop GUI
+    build their forms from (config/param_schema.py) -- so the two UIs
+    can't silently expose different knobs."""
+    return JSONResponse(schema_as_json())
+
+
+@app.get("/api/config/default")
+def api_config_default() -> JSONResponse:
+    return JSONResponse(_load_default_config())
+
+
+@app.post("/api/control/upload_video")
+async def api_upload_video(file: UploadFile) -> JSONResponse:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "upload.mp4").name  # strip any path components
+    dest = UPLOAD_DIR / safe_name
+    with open(dest, "wb") as f:
+        f.write(await file.read())
+    return JSONResponse({"path": str(dest)})
+
+
+@app.post("/api/control/start")
+async def api_control_start(payload: dict) -> JSONResponse:
+    """payload: {"ui_values": {<path/string>: value, ...}, "video_path": optional str}.
+    ui_values is resolved against config/default_config.yaml through the
+    exact same config/param_schema.py machinery the desktop GUI uses, so
+    a web-started run and a GUI-started run with the same slider values
+    produce the same config dict, not two independently-guessed ones."""
+    base_cfg = _load_default_config()
+    ui_values = payload.get("ui_values", {})
+    cfg = resolve_ui_values(base_cfg, ui_values)
+    cfg = apply_scenario_preset_if_set(cfg)
+    try:
+        result = live_engine.start(cfg, video_path=payload.get("video_path"))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"could not start run: {exc}")
+    return JSONResponse(result)
+
+
+@app.post("/api/control/stop")
+def api_control_stop() -> JSONResponse:
+    try:
+        result = live_engine.stop(str(LOGS_DIR))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return JSONResponse(result)
+
+
+@app.get("/api/control/status")
+def api_control_status() -> JSONResponse:
+    return JSONResponse(live_engine.status())
+
+
+@app.websocket("/ws/live")
+async def ws_live(websocket: WebSocket):
+    """Streams real per-frame telemetry (identical FrameRecord schema to
+    the .jsonl replay files) as it's produced by the live engine, plus a
+    periodic status/metrics message. No control happens over this socket
+    -- it is receive-only from the browser's perspective; start/stop go
+    through the POST endpoints above."""
+    await websocket.accept()
+    try:
+        while True:
+            await asyncio.sleep(0.05)
+            frames = live_engine.pop_new_frames()
+            if frames:
+                await websocket.send_json({"type": "frames", "frames": frames})
+            await websocket.send_json({"type": "status", "status": live_engine.status()})
+    except WebSocketDisconnect:
+        pass
+
+
+@app.get("/control", response_class=HTMLResponse)
+def control_page() -> str:
+    return _CONTROL_HTML
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return _PAGE_HTML
@@ -120,6 +223,8 @@ _PAGE_HTML = r"""<!doctype html>
   header p { margin: 4px 0 0; color: #8b8f9a; font-size: 13px; }
   .badge { display: inline-block; background: #1e293b; color: #7dd3fc;
            padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
+  .nav-link { float: right; font-size: 13px; color: #60a5fa; text-decoration: none; font-weight: 500; }
+  .nav-link:hover { text-decoration: underline; }
   main { display: grid; grid-template-columns: 280px 1fr; gap: 0; min-height: calc(100vh - 80px); }
   #runlist { border-right: 1px solid #23262f; overflow-y: auto; }
   .run-item { padding: 12px 20px; cursor: pointer; border-bottom: 1px solid #1a1c24; font-size: 13px; }
@@ -152,8 +257,10 @@ _PAGE_HTML = r"""<!doctype html>
 </head>
 <body>
 <header>
-  <h1>FSOC Coarse-Alignment Tracker <span class="badge">read-only results viewer</span></h1>
-  <p>Browses logs already written by a run of main.py. Does not control, configure, or connect to the tracker.</p>
+  <h1>FSOC Coarse-Alignment Tracker <span class="badge">results &amp; replay</span>
+    <a href="/control" class="nav-link">Open Live Control &rarr;</a></h1>
+  <p>Browses logs already written by past runs (from here or the desktop app). For starting a new
+     live run from the browser, use <a href="/control">Live Control</a>.</p>
 </header>
 <main>
   <div id="runlist"><div class="empty">Loading...</div></div>
@@ -291,124 +398,18 @@ _VIEW3D_HTML = r"""<!doctype html>
 { "imports": { "three": "/static/three.module.min.js" } }
 </script>
 <script type="module">
-import * as THREE from "three";
-import { OrbitControls } from "/static/OrbitControls.js";
+import { createPATScene } from "/static/pat_scene.js";
 
 const RUN_NAME = "__RUN_NAME__";
-const DISPLAY_RANGE = 400;
-const LOCK_COLORS = {
-  searching: 0xef4444, acquiring: 0xeab308, reacquiring: 0xeab308, locked: 0x22c55e,
-};
-
-function anglesToPoint(panDeg, tiltDeg, range = DISPLAY_RANGE) {
-  const pan = panDeg * Math.PI / 180, tilt = tiltDeg * Math.PI / 180;
-  return new THREE.Vector3(range * Math.tan(pan), range * Math.tan(tilt), range);
-}
-
-const holder = document.getElementById("canvas-holder");
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-holder.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0b0f);
-const camera3 = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 5000);
-camera3.position.set(500, 350, -500);
-camera3.lookAt(0, 0, DISPLAY_RANGE);
-
-const controls = new OrbitControls(camera3, renderer.domElement);
-controls.target.set(0, 0, DISPLAY_RANGE * 0.5);
-controls.update();
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-dirLight.position.set(200, 400, -200);
-scene.add(dirLight);
-
-const grid = new THREE.GridHelper(800, 16, 0x334155, 0x1e293b);
-grid.rotation.x = Math.PI / 2;
-grid.position.z = DISPLAY_RANGE;
-scene.add(grid);
-
-const axesHelper = new THREE.AxesHelper(150);
-scene.add(axesHelper);
-
-const coneGeo = new THREE.ConeGeometry(40, DISPLAY_RANGE * 0.9, 24, 1, true);
-coneGeo.rotateX(Math.PI / 2); // cone's default axis is +Y; point it along +Z
-coneGeo.translate(0, 0, DISPLAY_RANGE * 0.45);
-const coneMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
-const coneMesh = new THREE.Mesh(coneGeo, coneMat);
-scene.add(coneMesh);
-
-const gtGeo = new THREE.SphereGeometry(9, 16, 16);
-const gtMat = new THREE.MeshStandardMaterial({ color: 0x4ade80 });
-const gtMesh = new THREE.Mesh(gtGeo, gtMat);
-scene.add(gtMesh);
-
-const beliefGeo = new THREE.SphereGeometry(7, 16, 16);
-const beliefMat = new THREE.MeshStandardMaterial({ color: 0xfacc15 });
-const beliefMesh = new THREE.Mesh(beliefGeo, beliefMat);
-scene.add(beliefMesh);
-
-const MAX_TRAIL = 400;
-function makeTrail(color) {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(MAX_TRAIL * 3), 3));
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 });
-  const line = new THREE.Line(geo, mat);
-  line.userData.points = [];
-  scene.add(line);
-  return line;
-}
-const targetTrail = makeTrail(0x4ade80);
-const camTrail = makeTrail(0x3b82f6);
-
-function pushTrail(line, point) {
-  const pts = line.userData.points;
-  pts.push(point.clone());
-  if (pts.length > MAX_TRAIL) pts.shift();
-  const pos = line.geometry.attributes.position;
-  for (let i = 0; i < pts.length; i++) {
-    pos.setXYZ(i, pts[i].x, pts[i].y, pts[i].z);
-  }
-  line.geometry.setDrawRange(0, pts.length);
-  pos.needsUpdate = true;
-}
+const patScene = createPATScene(document.getElementById("canvas-holder"));
+patScene.startRenderLoop();
 
 let frames = [];
 let idx = 0;
 let playing = true;
 
-function applyFrame(rec) {
-  if (rec.cam_pan_deg == null || rec.cam_tilt_deg == null) return;
-  const camPt = anglesToPoint(rec.cam_pan_deg, rec.cam_tilt_deg);
-  coneMesh.position.set(0, 0, 0);
-  coneMesh.lookAt(camPt);
-  // Cone geometry's rest pose already points along +Z at DISPLAY_RANGE*0.45;
-  // lookAt() rotates the mesh so its local +Z axis aims at camPt.
-  coneMat.color.setHex(LOCK_COLORS[rec.lock_state] || 0x888888);
-  pushTrail(camTrail, camPt);
-
-  const fov = rec.fov_deg || [4.0, 3.0];
-  const pxPerDegX = 640 / fov[0], pxPerDegY = 480 / fov[1];
-
-  if (rec.ground_truth_px && rec.ground_truth_px.length > 0) {
-    const [gx, gy] = rec.ground_truth_px[0];
-    const tPan = rec.cam_pan_deg + (gx - 320) / pxPerDegX;
-    const tTilt = rec.cam_tilt_deg + (gy - 240) / pxPerDegY;
-    const tPt = anglesToPoint(tPan, tTilt);
-    gtMesh.position.copy(tPt);
-    gtMesh.visible = true;
-    pushTrail(targetTrail, tPt);
-  } else {
-    gtMesh.visible = false;
-  }
-
-  const [px, py] = rec.predicted_px;
-  const bPan = rec.cam_pan_deg + (px - 320) / pxPerDegX;
-  const bTilt = rec.cam_tilt_deg + (py - 240) / pxPerDegY;
-  beliefMesh.position.copy(anglesToPoint(bPan, bTilt));
-
+function showFrame(rec) {
+  patScene.applyFrame(rec);
   document.getElementById("frame-label").textContent =
     `frame ${rec.frame_id} / ${frames.length - 1}   t=${rec.timestamp.toFixed(2)}s   lock=${rec.lock_state}`;
 }
@@ -435,8 +436,10 @@ async function load() {
   document.getElementById("controls").style.display = "flex";
   const scrub = document.getElementById("scrub");
   scrub.max = frames.length - 1;
-  scrub.addEventListener("input", () => { idx = parseInt(scrub.value, 10); playing = false; playBtn.textContent = "Play"; applyFrame(frames[idx]); });
-  applyFrame(frames[0]);
+  scrub.addEventListener("input", () => {
+    idx = parseInt(scrub.value, 10); playing = false; playBtn.textContent = "Play"; showFrame(frames[idx]);
+  });
+  showFrame(frames[0]);
 }
 
 const playBtn = document.getElementById("playBtn");
@@ -446,34 +449,30 @@ playBtn.addEventListener("click", () => {
 });
 
 let lastAdvance = performance.now();
-function animate() {
-  requestAnimationFrame(animate);
+function advance() {
+  requestAnimationFrame(advance);
   const now = performance.now();
   if (playing && frames.length > 0 && now - lastAdvance > 33) {
     idx = (idx + 1) % frames.length;
     document.getElementById("scrub").value = idx;
-    applyFrame(frames[idx]);
+    showFrame(frames[idx]);
     lastAdvance = now;
   }
-  controls.update();
-  renderer.render(scene, camera3);
 }
 
-window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera3.aspect = window.innerWidth / window.innerHeight;
-  camera3.updateProjectionMatrix();
-});
-
 load();
-animate();
+advance();
 </script>
 </body>
 </html>"""
 
 
+from web.control_page import CONTROL_HTML as _CONTROL_HTML  # noqa: E402
+
+
 if __name__ == "__main__":
     import uvicorn
     print(f"Reading run logs from: {LOGS_DIR}")
-    print("Open http://127.0.0.1:8420/ in a browser.")
+    print("Open http://127.0.0.1:8420/       for results & replay")
+    print("Open http://127.0.0.1:8420/control for live simulation control")
     uvicorn.run(app, host="127.0.0.1", port=8420, log_level="warning")

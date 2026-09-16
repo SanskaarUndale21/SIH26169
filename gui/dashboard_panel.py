@@ -1,5 +1,7 @@
-"""Real-time performance plots: tracking error, FPS, lock-state timeline,
-plus a live readout of the auto-computed performance metrics."""
+"""Real-time performance dashboard: tracking-error/FPS/lock-state plots,
+plus a proper metric-card readout (colour-coded against the Section 10
+thresholds, with units) instead of a raw dict dump.
+"""
 from __future__ import annotations
 
 import time
@@ -7,9 +9,92 @@ from collections import deque
 
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
+from PySide6.QtWidgets import (QGridLayout, QLabel, QScrollArea, QVBoxLayout, QWidget)
 
 LOCK_STATE_CODE = {"searching": 0, "acquiring": 1, "reacquiring": 2, "locked": 3}
+
+# Section 10 hard performance targets: (comparison, threshold, unit)
+THRESHOLDS = {
+    "acquisition_time_sec": ("<=", 2.0, "s"),
+    "avg_tracking_error_px": ("<=", 10.0, "px"),
+    "max_tracking_error_px": ("<=", 10.0, "px"),
+    "fps": (">=", 20.0, "FPS"),
+    "lock_retention_rate": (">=", 0.95, ""),
+    "processing_time_per_frame_ms": ("<=", 50.0, "ms"),
+}
+
+METRIC_LABELS = {
+    "simulation_duration_sec": "Sim duration",
+    "fps": "FPS",
+    "acquisition_time_sec": "Acquisition time",
+    "avg_tracking_error_px": "Avg tracking error",
+    "max_tracking_error_px": "Max tracking error",
+    "lock_retention_rate": "Lock retention",
+    "processing_time_per_frame_ms": "Proc. time/frame",
+    "rmse_px": "RMSE",
+    "re_acquisition_count": "Re-acquisitions",
+    "avg_angular_error_urad": "Avg angular error",
+    "max_angular_error_urad": "Max angular error",
+    "avg_pointing_loss_db": "Avg pointing loss",
+    "max_pointing_loss_db": "Max pointing loss",
+    "handoff_ready_rate": "Handoff-ready rate",
+    "time_to_handoff_ready_sec": "Time to handoff-ready",
+}
+
+CARD_STYLE_BASE = """
+    QLabel#card {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; padding: 8px 10px; }}
+"""
+
+
+def _verdict(key: str, val) -> str:
+    if key not in THRESHOLDS or val is None:
+        return "na"
+    op, threshold, _ = THRESHOLDS[key]
+    ok = (val <= threshold) if op == "<=" else (val >= threshold)
+    return "ok" if ok else "bad"
+
+
+def _fmt(val, unit: str) -> str:
+    if val is None:
+        return "N/A"
+    if isinstance(val, list):
+        return f"{len(val)} event(s)"
+    if isinstance(val, bool):
+        return "yes" if val else "no"
+    if isinstance(val, (int, float)):
+        s = f"{val:.3f}" if abs(val) < 10 else f"{val:.2f}"
+        return f"{s} {unit}".strip()
+    return str(val)
+
+
+class MetricCard(QLabel):
+    COLORS = {
+        "ok": ("#0f2a1a", "#22c55e", "#4ade80"),
+        "bad": ("#2a1414", "#ef4444", "#f87171"),
+        "na": ("#171922", "#23262f", "#9ca3af"),
+    }
+
+    def __init__(self, key: str):
+        super().__init__()
+        self.key = key
+        self.setObjectName("card")
+        self.setTextFormat(Qt.RichText)
+        self.set_value(None)
+
+    def set_value(self, val):
+        unit = THRESHOLDS.get(self.key, (None, None, ""))[2]
+        verdict = _verdict(self.key, val)
+        bg, border, text_color = self.COLORS[verdict]
+        label = METRIC_LABELS.get(self.key, self.key.replace("_", " "))
+        value_str = _fmt(val, unit)
+        self.setStyleSheet(
+            f"QLabel {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; "
+            f"padding: 8px 12px; }}"
+        )
+        self.setText(
+            f"<div style='font-size:10px; color:#9ca3af; text-transform:uppercase;'>{label}</div>"
+            f"<div style='font-size:18px; font-weight:600; color:{text_color};'>{value_str}</div>"
+        )
 
 
 class DashboardPanel(QWidget):
@@ -22,7 +107,7 @@ class DashboardPanel(QWidget):
         self.state_hist = deque(maxlen=max_points)
         self._last_frame_wall_t = None
 
-        layout = QGridLayout(self)
+        outer = QVBoxLayout(self)
 
         pg.setConfigOptions(antialias=True)
         self.err_plot = pg.PlotWidget(title="Tracking error (px)")
@@ -36,13 +121,24 @@ class DashboardPanel(QWidget):
         self.state_plot = pg.PlotWidget(title="Lock state (0=searching 1=acquiring 2=reacquiring 3=locked)")
         self.state_curve = self.state_plot.plot(pen=pg.mkPen("#5cb85c", width=2))
 
-        layout.addWidget(self.err_plot, 0, 0)
-        layout.addWidget(self.fps_plot, 1, 0)
-        layout.addWidget(self.state_plot, 2, 0)
+        outer.addWidget(self.err_plot, stretch=2)
+        outer.addWidget(self.fps_plot, stretch=2)
+        outer.addWidget(self.state_plot, stretch=2)
 
-        self.metrics_label = QLabel("")
-        self.metrics_label.setStyleSheet("font-family: monospace; font-size: 11px;")
-        layout.addWidget(self.metrics_label, 3, 0)
+        cards_label = QLabel("Live performance metrics (Section 10 thresholds colour-coded)")
+        cards_label.setStyleSheet("color:#9ca3af; font-size: 11px; margin-top: 6px;")
+        outer.addWidget(cards_label)
+
+        self.cards_grid = QGridLayout()
+        self.cards_grid.setSpacing(8)
+        self._cards: dict = {}
+        cards_container = QWidget()
+        cards_container.setLayout(self.cards_grid)
+        scroll = QScrollArea()
+        scroll.setWidget(cards_container)
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(220)
+        outer.addWidget(scroll, stretch=1)
 
     def update_from_telemetry(self, telemetry, tracking_error):
         now = time.perf_counter()
@@ -60,5 +156,10 @@ class DashboardPanel(QWidget):
         self.state_curve.setData(t, list(self.state_hist))
 
     def update_metrics_readout(self, metrics: dict):
-        lines = [f"{k}: {v}" for k, v in metrics.items()]
-        self.metrics_label.setText("\n".join(lines))
+        for key, val in metrics.items():
+            if key not in self._cards:
+                card = MetricCard(key)
+                idx = len(self._cards)
+                self.cards_grid.addWidget(card, idx // 3, idx % 3)
+                self._cards[key] = card
+            self._cards[key].set_value(val)

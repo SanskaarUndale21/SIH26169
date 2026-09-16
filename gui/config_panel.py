@@ -1,14 +1,87 @@
-"""Parameter configuration panel exposing every Section 3 control, plus the
-input-source selector (Simulator vs. .mp4 file) required to satisfy
-Benchmark-2 -- it's the literal switch that swaps the FrameSource
-implementation in main_window.py."""
+"""Parameter configuration panel: dynamically built from
+config/param_schema.py, so every tweakable simulation parameter (screen
+size, camera, target motion of all four types, PTZ limits, every
+disturbance's intensity, detector/tracker/PID gains, link budget,
+scenario presets) gets a widget here automatically -- there is no
+hand-maintained subset that can drift out of sync with what the engine
+actually reads, and no parameter silently missing from the UI.
+
+Also owns the input-source selector (Simulator vs. .mp4 file) required
+for Benchmark-2 -- it's the literal switch that swaps the FrameSource
+implementation in main_window.py.
+"""
 from __future__ import annotations
 
 import copy
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                 QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-                                QPushButton, QSpinBox, QVBoxLayout, QWidget)
+                                QPushButton, QScrollArea, QSlider, QSpinBox,
+                                QTabWidget, QVBoxLayout, QWidget)
+
+from config.param_schema import GROUP_ORDER, PARAM_SCHEMA, flatten_config_to_ui_values, get_path
+
+
+class _NumericRow(QWidget):
+    """A slider + spinbox pair kept in sync, with a unit label -- this is
+    what makes every numeric parameter genuinely tweakable at a glance
+    (drag the slider for a quick sweep, or type an exact value) rather
+    than a bare spinbox with no sense of its own range."""
+
+    def __init__(self, param, parent=None):
+        super().__init__(parent)
+        self.param = param
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.slider = QSlider(Qt.Horizontal)
+        is_int = param.kind == "int"
+        scale = 1 if is_int else max(1, int(round(1 / (param.step or 0.1))))
+        self._scale = scale
+        self.slider.setMinimum(int(round(param.min * scale)))
+        self.slider.setMaximum(int(round(param.max * scale)))
+        self.slider.setValue(int(round(param.default * scale)))
+
+        if is_int:
+            self.spin = QSpinBox()
+            self.spin.setRange(int(param.min), int(param.max))
+            self.spin.setSingleStep(int(param.step or 1))
+            self.spin.setValue(int(param.default))
+        else:
+            self.spin = QDoubleSpinBox()
+            self.spin.setRange(param.min, param.max)
+            self.spin.setSingleStep(param.step or 0.1)
+            self.spin.setDecimals(3 if (param.step or 0.1) < 0.1 else 2)
+            self.spin.setValue(param.default)
+        if param.unit:
+            self.spin.setSuffix(f" {param.unit}")
+
+        self.slider.valueChanged.connect(self._slider_to_spin)
+        self.spin.valueChanged.connect(self._spin_to_slider)
+
+        layout.addWidget(self.slider, stretch=3)
+        layout.addWidget(self.spin, stretch=1)
+
+        if param.help:
+            self.setToolTip(param.help)
+            self.slider.setToolTip(param.help)
+
+    def _slider_to_spin(self, v):
+        self.spin.blockSignals(True)
+        self.spin.setValue(v / self._scale)
+        self.spin.blockSignals(False)
+
+    def _spin_to_slider(self, v):
+        self.slider.blockSignals(True)
+        self.slider.setValue(int(round(v * self._scale)))
+        self.slider.blockSignals(False)
+
+    def value(self):
+        return self.spin.value()
+
+    def set_value(self, v):
+        self.spin.setValue(v)
 
 
 class ConfigPanel(QWidget):
@@ -16,9 +89,12 @@ class ConfigPanel(QWidget):
         super().__init__(parent)
         self.config = copy.deepcopy(base_config)
         self.video_path = None
-        layout = QVBoxLayout(self)
+        self._widgets: dict = {}  # "path/string" -> widget
 
-        # --- input source ---
+        outer = QVBoxLayout(self)
+
+        # --- input source (not schema-driven: this is a UI-mode switch,
+        # not a simulation parameter) ---
         src_group = QGroupBox("Input source")
         src_layout = QVBoxLayout(src_group)
         self.source_combo = QComboBox()
@@ -32,80 +108,63 @@ class ConfigPanel(QWidget):
         file_row.addWidget(self.file_label)
         file_row.addWidget(browse_btn)
         src_layout.addLayout(file_row)
-        layout.addWidget(src_group)
+        outer.addWidget(src_group)
 
-        # --- scenario preset ---
-        scenario_group = QGroupBox("Scenario preset (optional)")
-        f = QFormLayout(scenario_group)
-        self.scenario_combo = QComboBox()
-        self.scenario_combo.addItems(["(none -- use generic target/motion below)",
-                                       "leo_leo_crosslink", "leo_ground_downlink", "geo_ground"])
-        f.addRow("Preset", self.scenario_combo)
-        note = QLabel("Overrides target motion + link budget with values\nderived from real orbital mechanics.")
-        note.setStyleSheet("color: #888; font-size: 10px;")
-        f.addRow(note)
-        layout.addWidget(scenario_group)
+        # --- everything else: schema-driven tabs, one per group ---
+        tabs = QTabWidget()
+        outer.addWidget(tabs, stretch=1)
 
-        # --- target ---
-        target_group = QGroupBox("Target")
-        f = QFormLayout(target_group)
-        self.motion_combo = QComboBox()
-        self.motion_combo.addItems(["straight_line", "circular", "figure8", "random", "spiral"])
-        self.motion_combo.setCurrentText(self.config["target"]["motion"])
-        f.addRow("Motion", self.motion_combo)
-        self.shape_combo = QComboBox()
-        self.shape_combo.addItems(["square", "circle"])
-        self.shape_combo.setCurrentText(self.config["target"]["shape"])
-        f.addRow("Shape", self.shape_combo)
-        self.size_spin = QSpinBox(); self.size_spin.setRange(5, 20)
-        self.size_spin.setValue(self.config["target"]["size_px"][0])
-        f.addRow("Size (px)", self.size_spin)
-        layout.addWidget(target_group)
+        by_group: dict = {}
+        for p in PARAM_SCHEMA:
+            by_group.setdefault(p.group, []).append(p)
 
-        # --- camera ---
-        cam_group = QGroupBox("Camera")
-        f = QFormLayout(cam_group)
-        self.fov_x_spin = QDoubleSpinBox(); self.fov_x_spin.setRange(0.5, 30)
-        self.fov_x_spin.setValue(self.config["camera"]["fov_deg"][0])
-        self.fov_y_spin = QDoubleSpinBox(); self.fov_y_spin.setRange(0.5, 30)
-        self.fov_y_spin.setValue(self.config["camera"]["fov_deg"][1])
-        f.addRow("FOV X (deg)", self.fov_x_spin)
-        f.addRow("FOV Y (deg)", self.fov_y_spin)
-        layout.addWidget(cam_group)
+        ui_values = flatten_config_to_ui_values(self.config)
+        for group in GROUP_ORDER:
+            params = by_group.get(group)
+            if not params:
+                continue
+            tab = QWidget()
+            form = QFormLayout(tab)
+            for p in params:
+                key = "/".join(str(k) for k in p.path)
+                current = ui_values.get(key, p.default)
+                widget = self._build_widget(p, current)
+                self._widgets[key] = widget
+                form.addRow(p.label, widget)
+            scroll = QScrollArea()
+            scroll.setWidget(tab)
+            scroll.setWidgetResizable(True)
+            tabs.addTab(scroll, group)
 
-        # --- PTZ ---
-        ptz_group = QGroupBox("PTZ speed limits")
-        f = QFormLayout(ptz_group)
-        self.pan_speed_spin = QDoubleSpinBox(); self.pan_speed_spin.setRange(1, 30)
-        self.pan_speed_spin.setValue(self.config["ptz"]["max_pan_speed_deg_s"])
-        self.tilt_speed_spin = QDoubleSpinBox(); self.tilt_speed_spin.setRange(1, 30)
-        self.tilt_speed_spin.setValue(self.config["ptz"]["max_tilt_speed_deg_s"])
-        f.addRow("Max pan speed (deg/s)", self.pan_speed_spin)
-        f.addRow("Max tilt speed (deg/s)", self.tilt_speed_spin)
-        layout.addWidget(ptz_group)
-
-        # --- disturbances ---
-        dist_group = QGroupBox("Disturbances")
-        f = QFormLayout(dist_group)
-        self.sp_check = QCheckBox("Salt & pepper noise")
-        self.gauss_check = QCheckBox("Gaussian noise")
-        self.poisson_check = QCheckBox("Poisson noise")
-        self.jitter_check = QCheckBox("Camera jitter")
-        self.jitter_structured_check = QCheckBox("Structured (resonant) jitter")
-        self.turbulence_check = QCheckBox("Atmospheric turbulence (slow, ~10 FPS alone)")
-        self.atmo_combo = QComboBox()
-        self.atmo_combo.addItems(["clear", "haze", "fog", "rain", "low_light"])
-        f.addRow(self.sp_check)
-        f.addRow(self.gauss_check)
-        f.addRow(self.poisson_check)
-        f.addRow(self.jitter_check)
-        f.addRow(self.jitter_structured_check)
-        f.addRow(self.turbulence_check)
-        f.addRow("Atmosphere", self.atmo_combo)
-        layout.addWidget(dist_group)
-
-        layout.addStretch(1)
         self._on_source_changed(0)
+
+    def _build_widget(self, param, current_value):
+        if param.kind == "bool":
+            w = QCheckBox()
+            w.setChecked(bool(current_value))
+            if param.help:
+                w.setToolTip(param.help)
+            return w
+        if param.kind == "enum":
+            w = QComboBox()
+            for value, display in param.options:
+                w.addItem(display, value)
+            idx = next((i for i, (v, _) in enumerate(param.options) if v == current_value), 0)
+            w.setCurrentIndex(idx)
+            if param.help:
+                w.setToolTip(param.help)
+            return w
+        # int / float -> slider + spinbox
+        row = _NumericRow(param)
+        row.set_value(current_value if current_value is not None else param.default)
+        return row
+
+    def _read_widget(self, param, widget):
+        if param.kind == "bool":
+            return widget.isChecked()
+        if param.kind == "enum":
+            return widget.currentData()
+        return widget.value()
 
     def _on_source_changed(self, idx):
         is_video = idx == 1
@@ -120,24 +179,21 @@ class ConfigPanel(QWidget):
     def is_video_mode(self) -> bool:
         return self.source_combo.currentIndex() == 1
 
-    def build_config(self) -> dict:
-        cfg = copy.deepcopy(self.config)
-        cfg["target"]["motion"] = self.motion_combo.currentText()
-        cfg["target"]["shape"] = self.shape_combo.currentText()
-        cfg["target"]["size_px"] = [self.size_spin.value(), self.size_spin.value()]
-        cfg["camera"]["fov_deg"] = [self.fov_x_spin.value(), self.fov_y_spin.value()]
-        cfg["ptz"]["max_pan_speed_deg_s"] = self.pan_speed_spin.value()
-        cfg["ptz"]["max_tilt_speed_deg_s"] = self.tilt_speed_spin.value()
-        cfg["disturbances"]["noise"]["salt_pepper"]["enabled"] = self.sp_check.isChecked()
-        cfg["disturbances"]["noise"]["gaussian"]["enabled"] = self.gauss_check.isChecked()
-        cfg["disturbances"]["noise"]["poisson"]["enabled"] = self.poisson_check.isChecked()
-        cfg["disturbances"]["jitter"]["enabled"] = self.jitter_check.isChecked()
-        cfg["disturbances"]["jitter"]["structured"] = self.jitter_structured_check.isChecked()
-        cfg["disturbances"]["turbulence"]["enabled"] = self.turbulence_check.isChecked()
-        cfg["disturbances"]["atmosphere"]["mode"] = self.atmo_combo.currentText()
+    def collect_ui_values(self) -> dict:
+        """Returns the flat {path_string: value} map straight from the
+        widgets -- used both to build a run config (build_config) and to
+        show/export the exact parameter set a run used."""
+        values = {}
+        for p in PARAM_SCHEMA:
+            key = "/".join(str(k) for k in p.path)
+            widget = self._widgets.get(key)
+            if widget is not None:
+                values[key] = self._read_widget(p, widget)
+        return values
 
-        preset_idx = self.scenario_combo.currentIndex()
-        if preset_idx > 0:
-            from simulator.scenario_presets import apply_preset
-            cfg = apply_preset(self.scenario_combo.currentText(), cfg)
+    def build_config(self) -> dict:
+        from config.param_schema import apply_scenario_preset_if_set, resolve_ui_values
+        ui_values = self.collect_ui_values()
+        cfg = resolve_ui_values(self.config, ui_values)
+        cfg = apply_scenario_preset_if_set(cfg)
         return cfg

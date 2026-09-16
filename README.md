@@ -12,14 +12,34 @@ pip install -r requirements.txt
 
 Requires Python 3.10+.
 
-## Run the GUI
+## Run the desktop GUI
 
 ```
 python main.py
 ```
 
-Pick "Simulator" or "Load video file (.mp4)" in the config panel, adjust
-parameters, and press Start.
+Pick "Simulator" or "Load video file (.mp4)" in the config panel, tweak
+any of the 63 exposed parameters (screen/camera/target motion of all
+four types/PTZ/every disturbance intensity/detector/IMM/PID/link
+budget/scenario presets), and press Start. Live 2D dashboard and a 3D
+pan-tilt visualization update as the run progresses; every parameter is
+also readable/writable from `config/param_schema.py` if you want to
+script a sweep.
+
+## Run the web dashboard + live control
+
+```
+python web/dashboard_server.py
+```
+
+- `http://127.0.0.1:8420/` -- browse past run logs, open a 3D replay of
+  any recorded run.
+- `http://127.0.0.1:8420/control` -- a second, independent front-end onto
+  the *same* real engine: the identical parameter schema as the desktop
+  GUI, Start/Stop, and a live 3D view + charts streamed over a WebSocket
+  as the run actually happens. Not a mockup or a static demo page -- it
+  runs a real `TrackingRunner` in a background thread
+  (`web/live_engine.py`) and only one run is live at a time.
 
 ## Run tests
 
@@ -45,7 +65,18 @@ in `perception/frame_source.py` and `perception/pipeline.py`:
   live view/dashboard/performance log.
 - `perf_logging/` -- performance log writer (named `perf_logging`, not
   `logging`, to avoid shadowing Python's stdlib `logging` module that
-  several dependencies rely on).
+  several dependencies rely on) plus `frame_log.py`'s per-frame recorder,
+  the real telemetry trace both 3D views (GUI and web) replay/stream from.
+- `web/` -- `dashboard_server.py` (FastAPI: results browsing, 3D replay,
+  live control), `live_engine.py` (runs a real `TrackingRunner` in a
+  background thread for `/control`), `control_page.py` /
+  `static/pat_scene.js` (the live-control UI and its shared Three.js
+  scene, also used by the replay page).
+- `config/param_schema.py` -- the single list of every tweakable
+  parameter (62 across scene/camera/target-motion/PTZ/disturbances/
+  detector/tracker/PID/link-budget/scenario-presets), consumed by
+  *both* `gui/config_panel.py` and the web `/control` page so neither UI
+  can silently expose a different knob set than the other.
 
 See `config/default_config.yaml` for every configurable parameter and its
 default, and `docs/` for the technical report and user manual outlines.
