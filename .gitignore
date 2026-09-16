@@ -12,6 +12,7 @@ build/
 *.log
 **/logs/*.json
 **/logs/*.csv
+**/logs/*.jsonl
 .claude/
 *.spec
 26169.pdf

@@ -4,8 +4,15 @@ opencv-python>=4.9
 PyYAML>=6.0
 PySide6>=6.6
 pyqtgraph>=0.13
+PyOpenGL>=3.1          # required by pyqtgraph.opengl -- gui/view3d_panel.py's 3D PAT view
 pytest>=8.0
 pyinstaller>=6.6
+
+# Optional standalone web dashboard (web/dashboard_server.py) -- a
+# read-only results viewer + 3D replay, fully decoupled from the tracker
+# (see that file's docstring). Not required to run main.py.
+fastapi>=0.110
+uvicorn>=0.29
 
 # Optional: only needed for perception/cnn_filter.py (Section 8.4's
 # optional learned false-positive filter). Everything else works with

@@ -9,15 +9,17 @@ import os
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QHBoxLayout, QMainWindow, QMessageBox, QPushButton,
-                                QSplitter, QStatusBar, QVBoxLayout, QWidget)
+                                QSplitter, QStatusBar, QTabWidget, QVBoxLayout, QWidget)
 
 from control.actuator_interface import NullActuator, SimulatorActuator
 from control.stepper import PointingStepper
 from gui.config_panel import ConfigPanel
 from gui.dashboard_panel import DashboardPanel
 from gui.video_panel import VideoPanel
+from gui.view3d_panel import View3DPanel
 from perception.frame_source import SimulatorFrameSource, VideoFileFrameSource
 from perception.pipeline import PerceptionTrackingPipeline
+from perf_logging.frame_log import FrameLogWriter, FrameRecord, camera_pan_tilt_deg
 from perf_logging.performance_logger import RunMetrics, write_run_log
 from simulator.camera_model import CameraModel, PTZActuator
 from simulator.disturbances import DisturbanceConfig
@@ -36,6 +38,11 @@ class MainWindow(QMainWindow):
         self.config_panel = ConfigPanel(base_config)
         self.video_panel = VideoPanel()
         self.dashboard_panel = DashboardPanel()
+        self.view3d_panel = View3DPanel()
+
+        right_tabs = QTabWidget()
+        right_tabs.addTab(self.dashboard_panel, "2D Dashboard")
+        right_tabs.addTab(self.view3d_panel, "3D View")
 
         controls = QWidget()
         controls_layout = QHBoxLayout(controls)
@@ -58,7 +65,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter()
         splitter.addWidget(self.config_panel)
         splitter.addWidget(left)
-        splitter.addWidget(self.dashboard_panel)
+        splitter.addWidget(right_tabs)
         splitter.setSizes([260, 640, 420])
         self.setCentralWidget(splitter)
 
@@ -76,6 +83,10 @@ class MainWindow(QMainWindow):
         self.actuator = None
         self.camera = None
         self.metrics = RunMetrics()
+        self.frame_log = FrameLogWriter()
+        self._ref_world_xy = None
+        self._current_run_name = None
+        self.view3d_panel.reset()
 
     def start_run(self):
         cfg = self.config_panel.build_config()
@@ -100,6 +111,7 @@ class MainWindow(QMainWindow):
                 engine = SimulatorEngine(scene, self.camera, dcfg)
                 self.frame_source = SimulatorFrameSource(engine, fps=cam_cfg["update_rate_hz"])
                 self.actuator = SimulatorActuator(ptz)
+                self._ref_world_xy = (cfg["screen"]["width"] / 2, cfg["screen"]["height"] / 2)
         except Exception as exc:
             QMessageBox.critical(self, "Error starting run", str(exc))
             return
@@ -108,7 +120,12 @@ class MainWindow(QMainWindow):
         self.stepper = PointingStepper(cfg, self.camera) if self.camera is not None else None
         self.link_cfg = LinkBudgetConfig.from_config(cfg)
         self.metrics = RunMetrics()
+        self.frame_log = FrameLogWriter()
+        self.view3d_panel.reset()
+        self.view3d_panel.set_live_mode(self.camera is not None)
         self.config = cfg
+        import time as _time
+        self._current_run_name = _time.strftime("run_%Y%m%d_%H%M%S")
 
         self.timer.start(int(1000 / max(cfg["camera"]["update_rate_hz"], 1)))
         self.start_btn.setEnabled(False)
@@ -148,22 +165,52 @@ class MainWindow(QMainWindow):
         self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, 0.0,
                                    angular_error_urad=angular_error, link_loss_db=link_loss,
                                    handoff_ready=handoff_ready)
+
+        cam_pan_deg = cam_tilt_deg = None
+        if self.camera is not None and self._ref_world_xy is not None:
+            cam_pan_deg, cam_tilt_deg = camera_pan_tilt_deg(
+                self.camera.world_x, self.camera.world_y,
+                self._ref_world_xy[0], self._ref_world_xy[1], self.camera.world_px_per_deg)
+        ground_truth_px = None
+        if self.frame_source.is_live():
+            gts = getattr(self.frame_source, "last_ground_truth", [])
+            ground_truth_px = [(float(x), float(y)) for x, y in gts] if gts else []
+        record = FrameRecord(
+            frame_id=telemetry.frame_id, timestamp=telemetry.timestamp, detected=telemetry.detected,
+            centroid_px=telemetry.centroid_px, predicted_px=telemetry.predicted_px,
+            lock_state=telemetry.lock_state, confidence=telemetry.confidence,
+            pointing_command_deg=telemetry.pointing_command_deg, fov_deg=frame.fov_deg,
+            cam_pan_deg=cam_pan_deg, cam_tilt_deg=cam_tilt_deg, ground_truth_px=ground_truth_px,
+        )
+        self.frame_log.add(record)
+
         self.video_panel.show_frame(frame.image, telemetry)
         self.dashboard_panel.update_from_telemetry(telemetry, tracking_error)
         self.dashboard_panel.update_metrics_readout(self.metrics.finalize())
+        self.view3d_panel.update_frame(record)
         self.statusBar().showMessage(f"frame {frame.frame_id}  lock={telemetry.lock_state}")
 
     def stop_run(self):
         self.timer.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        if self._current_run_name is None:
+            self.statusBar().showMessage("Nothing to stop -- no run was started.")
+            return
         self.statusBar().showMessage("Stopped. Writing performance log...")
         out_dir = self.base_config.get("logging", {}).get("output_dir", "logs")
-        out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), out_dir)
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", out_dir)
+        out_dir = os.path.normpath(out_dir)
         try:
             m = self.metrics.finalize()
-            json_path, csv_path = write_run_log(m, out_dir)
-            self.statusBar().showMessage(f"Log written: {json_path}")
+            run_name = self._current_run_name
+            json_path, csv_path = write_run_log(m, out_dir, run_name)
+            msg = f"Log written: {json_path}"
+            if self.frame_log.records:
+                frames_path = os.path.join(out_dir, f"{run_name}_frames.jsonl")
+                self.frame_log.write(frames_path)
+                msg += f"  |  3D replay: {frames_path}"
+            self.statusBar().showMessage(msg)
         except Exception as exc:
             self.statusBar().showMessage(f"Log write failed: {exc}")
 
