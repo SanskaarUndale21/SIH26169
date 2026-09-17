@@ -32,7 +32,7 @@ The desktop window has three panels:
 - **Left**: configuration panel -- tabbed, one tab per parameter group
   (Scene, Camera, Target, one tab per motion type, PTZ, Noise, Jitter,
   Atmosphere, Turbulence, Platform Motion, Link Budget, Scenario Preset,
-  Detector, IMM Tracker, PID Control). Every one of the 62 tweakable
+  Detector, IMM Tracker, PID Control). Every one of the 63 tweakable
   simulation parameters has a slider+spinbox (numeric), checkbox (bool),
   or dropdown (enum) here -- see Section 3.
 - **Centre**: live video feed with detection/prediction overlay, and
@@ -163,7 +163,7 @@ Run `python web/dashboard_server.py`, then open:
   desktop app or the web control page below), see its metrics, and open
   a full 3D replay of any run that has a `_frames.jsonl`.
 - **`http://127.0.0.1:8420/control`** -- a second, independent front-end
-  onto the same real engine as the desktop GUI: the identical 62-parameter
+  onto the same real engine as the desktop GUI: the identical 63-parameter
   form (Section 3), an input-source selector with drag-and-drop `.mp4`
   upload, Start/Stop, live tracking-error/FPS charts, and the live 3D view
   streamed over a WebSocket as the run actually happens. Only one run can

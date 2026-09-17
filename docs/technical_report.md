@@ -16,6 +16,17 @@ This system replaces the physical camera/gimbal/beacon with a fully
 virtual simulation, so the coarse-alignment algorithm (detection, tracking,
 control) can be developed and benchmarked without hardware.
 
+This split matches how real FSOC terminals are actually built: coarse
+pointing assemblies (gimbal + wide-FOV camera/beacon feedback) commonly
+report accuracy near 1-1.6 mrad (3-sigma), handing off to a fine pointing
+assembly (fast steering mirror + quadrant detector) reporting accuracy
+near 80 microrad (3-sigma). This project's `fine_stage_capture_range_urad`
+default (500 microrad) is set between those two regimes -- a realistic
+coarse-to-fine handoff threshold, not an arbitrary number. See the README
+"How this matches real FSOC/PAT practice" section for the rest of the
+literature grounding (pointing-loss formula, IMM usage, coarse centroiding
+practice).
+
 ## 2. System architecture
 
 Three modules, connected only through two narrow interfaces:
@@ -53,7 +64,7 @@ per-frame `step()`, so both entry points drive the PTZ identically.
 
 ### 3.1 One parameter schema, two UIs
 
-Every tweakable simulation parameter (62 total: screen size, camera FOV/
+Every tweakable simulation parameter (63 total: screen size, camera FOV/
 resolution, target shape/size/location, each of the four motion types'
 own speed/radius/period parameters, PTZ speed limits, every disturbance's
 intensity including structured jitter and physically-derived turbulence,
