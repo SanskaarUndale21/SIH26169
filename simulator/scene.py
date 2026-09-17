@@ -46,7 +46,18 @@ class Scene:
                 # box demo/tests meeting Section 10's numbers; a specific
                 # initial_location can still be set in config for wider-area
                 # search testing.
-                radius = min(scene.width, scene.height) * 0.15
+                #
+                # 0.15 (300px = 6deg at the default 50px/deg) put the
+                # spawn well outside the camera's initial FOV (half-width
+                # ~2deg, half-height ~1.5deg at the default 4x3deg FOV),
+                # so acquisition always depended on the search pattern
+                # actually sweeping over it -- reliable eventually, but
+                # anywhere from ~2s to ~30s+ depending on spawn angle vs.
+                # search phase, which reads as "stuck searching" in a live
+                # demo. 0.05 (100px = 2deg) keeps the default spawn inside
+                # or right at the edge of the initial FOV, so the common
+                # case needs little or no search at all.
+                radius = min(scene.width, scene.height) * 0.05
                 x0 = scene.width / 2 + random.uniform(-radius, radius)
                 y0 = scene.height / 2 + random.uniform(-radius, radius)
             else:

@@ -52,11 +52,29 @@ class CircularMotion:
     height: int
     radius_px: float = 300.0
     period_s: float = 20.0
+    _phase: float = 0.0
+
+    def __post_init__(self):
+        # cx,cy as passed in is the target's actual t=0 spawn position
+        # (matching every other motion model's convention -- see
+        # simulator/scene.py's bounded-radius spawn), not the orbit
+        # centre. Without this, position(0) = cx + radius_px always
+        # landed a full radius_px away from the intended spawn point in
+        # the same fixed +x direction, regardless of how tight the spawn
+        # bounding was -- silently defeating the "spawn near boresight
+        # for fast acquisition" design and making circular motion the
+        # one preset that always needed a real search. Back-solving the
+        # true centre from a random phase makes the target start exactly
+        # at (cx, cy) like every other motion type.
+        self._phase = random.uniform(0, 2 * math.pi)
+        start_x, start_y = self.cx, self.cy
+        self.cx = start_x - self.radius_px * math.cos(self._phase)
+        self.cy = start_y - self.radius_px * math.sin(self._phase)
 
     def position(self, t: float) -> Tuple[float, float]:
         omega = 2 * math.pi / self.period_s
-        x = self.cx + self.radius_px * math.cos(omega * t)
-        y = self.cy + self.radius_px * math.sin(omega * t)
+        x = self.cx + self.radius_px * math.cos(omega * t + self._phase)
+        y = self.cy + self.radius_px * math.sin(omega * t + self._phase)
         return _clamp(x, self.width), _clamp(y, self.height)
 
 

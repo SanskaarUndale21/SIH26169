@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 
@@ -24,9 +25,21 @@ def test_straight_line_reflects_at_bounds():
 def test_circular_motion_traces_circle():
     m = CircularMotion(cx=1000, cy=1000, width=2000, height=2000, radius_px=200, period_s=10)
     x0, y0 = m.position(0)
-    assert abs((x0 - 1000) ** 2 + (y0 - 1000) ** 2 - 200 ** 2) < 1
-    x_q, y_q = m.position(2.5)  # quarter period
-    assert abs(x_q - 1000) < 5  # near top/bottom of circle
+    # Starts exactly at the given (cx, cy) -- matching every other motion
+    # model's convention that the constructor's cx/cy is the actual t=0
+    # position, not an orbit centre offset by a full radius_px from it.
+    assert abs(x0 - 1000) < 1e-6
+    assert abs(y0 - 1000) < 1e-6
+    # Still traces a real circle of the configured radius around whatever
+    # centre was back-solved from the random phase.
+    cx, cy = m.cx, m.cy
+    assert abs(math.hypot(x0 - cx, y0 - cy) - 200) < 1e-6
+    x1, y1 = m.position(2.5)
+    assert abs(math.hypot(x1 - cx, y1 - cy) - 200) < 1e-6
+    # A full period returns to the exact start position.
+    x_full, y_full = m.position(10)
+    assert abs(x_full - x0) < 1e-6
+    assert abs(y_full - y0) < 1e-6
 
 
 def test_figure8_is_periodic():
