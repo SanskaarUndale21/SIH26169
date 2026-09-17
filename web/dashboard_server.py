@@ -375,15 +375,16 @@ _VIEW3D_HTML = r"""<!doctype html>
 <div id="canvas-holder"></div>
 <div id="hud">
   <h1>3D PAT Replay -- __RUN_NAME__</h1>
-  <div class="note">Real recorded telemetry, replayed frame-by-frame. Copper cone = camera boresight
-    (actual PTZ pan/tilt this frame). Green dot = simulator ground truth. Yellow dot = tracker's
-    estimate (predicted_px, converted back to an absolute angle). Positions are drawn at a fixed
-    display range -- this simulator is 2D and does not model true 3D distance.</div>
+  <div class="note">Real recorded telemetry, replayed frame-by-frame. Copper cone = coarse assembly
+    boresight (actual PTZ pan/tilt this frame). Green dot = the beacon's simulator ground truth.
+    Yellow dot = the coarse tracker's estimate (predicted_px, converted back to an absolute angle).
+    Positions are drawn at a fixed display range -- this simulator is 2D and does not model true 3D
+    distance.</div>
 </div>
 <div id="legend">
-  <div><span class="dot" style="background:#d98a4f"></span>Cone = camera boresight (real pan/tilt)</div>
-  <div><span class="dot" style="background:#4ade80"></span>Ground truth target</div>
-  <div><span class="dot" style="background:#facc15"></span>Tracker estimate</div>
+  <div><span class="dot" style="background:#d98a4f"></span>Cone = coarse assembly boresight (real pan/tilt)</div>
+  <div><span class="dot" style="background:#4ade80"></span>Beacon (ground truth)</div>
+  <div><span class="dot" style="background:#facc15"></span>Coarse-tracked estimate</div>
   <div style="margin-top:6px;color:#5b6070;">Cone colour = lock state:</div>
   <div><span class="dot" style="background:#ef4444"></span>Searching</div>
   <div><span class="dot" style="background:#eab308"></span>Acquiring / reacquiring</div>

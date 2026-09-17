@@ -62,8 +62,8 @@ METRIC_LABELS = {
     "max_angular_error_urad": "Max angular error",
     "avg_pointing_loss_db": "Avg pointing loss",
     "max_pointing_loss_db": "Max pointing loss",
-    "handoff_ready_rate": "Handoff-ready rate",
-    "time_to_handoff_ready_sec": "Time to handoff-ready",
+    "handoff_ready_rate": "Coarse-to-fine handoff rate",
+    "time_to_handoff_ready_sec": "Time to coarse-to-fine handoff",
 }
 
 CARD_STYLE_BASE = """

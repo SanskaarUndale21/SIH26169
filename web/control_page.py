@@ -131,8 +131,8 @@ CONTROL_HTML = r"""<!doctype html>
 <body>
 <header>
   <div class="title-block">
-    <h1>FSOC Live Control</h1>
-    <span class="subtitle">Real live simulation engine -- same TrackingRunner as the desktop app</span>
+    <h1>FSOC Coarse Pointing Assembly -- Live Control</h1>
+    <span class="subtitle">Real live PAT engine -- same TrackingRunner as the desktop app, hands off to the fine stage at capture range</span>
   </div>
   <span id="status-badge" class="status-idle">idle</span>
   <span class="spacer"></span>
@@ -159,9 +159,9 @@ CONTROL_HTML = r"""<!doctype html>
   <div id="center-col">
     <div id="canvas-holder"></div>
     <div id="legend">
-      <div><span class="dot" style="background:#d98a4f"></span>Cone = camera boresight (real pan/tilt)</div>
-      <div><span class="dot" style="background:#4ade80"></span>Ground truth target</div>
-      <div><span class="dot" style="background:#facc15"></span>Tracker estimate</div>
+      <div><span class="dot" style="background:#d98a4f"></span>Cone = coarse assembly boresight (real pan/tilt)</div>
+      <div><span class="dot" style="background:#4ade80"></span>Beacon (ground truth)</div>
+      <div><span class="dot" style="background:#facc15"></span>Coarse-tracked estimate</div>
       <div style="margin-top:6px;color:#5b6070;">Cone colour = lock state:</div>
       <div><span class="dot" style="background:#ef4444"></span>Searching</div>
       <div><span class="dot" style="background:#eab308"></span>Acquiring / reacquiring</div>
@@ -212,7 +212,7 @@ const LABELS = {
   rmse_px: "RMSE", re_acquisition_count: "Re-acquisitions",
   avg_angular_error_urad: "Avg angular error", max_angular_error_urad: "Max angular error",
   avg_pointing_loss_db: "Avg pointing loss", max_pointing_loss_db: "Max pointing loss",
-  handoff_ready_rate: "Handoff-ready rate", time_to_handoff_ready_sec: "Time to handoff-ready",
+  handoff_ready_rate: "Coarse-to-fine handoff rate", time_to_handoff_ready_sec: "Time to coarse-to-fine handoff",
   re_acquisition_times_sec: "Re-acquisition times", target_loss_events: "Target loss events",
 };
 
