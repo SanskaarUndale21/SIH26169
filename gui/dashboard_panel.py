@@ -79,6 +79,9 @@ class MetricCard(QLabel):
         self.key = key
         self.setObjectName("card")
         self.setTextFormat(Qt.RichText)
+        self.setWordWrap(True)
+        self.setMinimumWidth(160)
+        self.setMinimumHeight(52)
         self.set_value(None)
 
     def set_value(self, val):
@@ -160,6 +163,6 @@ class DashboardPanel(QWidget):
             if key not in self._cards:
                 card = MetricCard(key)
                 idx = len(self._cards)
-                self.cards_grid.addWidget(card, idx // 3, idx % 3)
+                self.cards_grid.addWidget(card, idx // 2, idx % 2)
                 self._cards[key] = card
             self._cards[key].set_value(val)
