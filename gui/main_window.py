@@ -40,9 +40,10 @@ class MainWindow(QMainWindow):
         self.dashboard_panel = DashboardPanel()
         self.view3d_panel = View3DPanel()
 
-        right_tabs = QTabWidget()
-        right_tabs.addTab(self.dashboard_panel, "2D Dashboard")
-        right_tabs.addTab(self.view3d_panel, "3D View")
+        self.right_tabs = QTabWidget()
+        self.right_tabs.addTab(self.dashboard_panel, "2D Dashboard")
+        self.right_tabs.addTab(self.view3d_panel, "3D View")
+        self.right_tabs.currentChanged.connect(self._on_right_tab_changed)
 
         controls = QWidget()
         controls_layout = QHBoxLayout(controls)
@@ -65,7 +66,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter()
         splitter.addWidget(self.config_panel)
         splitter.addWidget(left)
-        splitter.addWidget(right_tabs)
+        splitter.addWidget(self.right_tabs)
         splitter.setSizes([260, 640, 420])
         self.setCentralWidget(splitter)
 
@@ -86,7 +87,24 @@ class MainWindow(QMainWindow):
         self.frame_log = FrameLogWriter()
         self._ref_world_xy = None
         self._current_run_name = None
+        self._last_frame = None
+        self._last_telemetry = None
+        self._last_tracking_error = None
+        self._last_record = None
         self.view3d_panel.reset()
+
+    def _on_right_tab_changed(self, index: int):
+        """Catches the panel that just became visible up to the latest
+        real data immediately, rather than leaving it stale until the
+        next timer tick (which step()'s visibility gating would
+        otherwise skip rendering for while a different tab was active)."""
+        if self._last_telemetry is None:
+            return
+        if index == 0:
+            self.dashboard_panel.update_from_telemetry(self._last_telemetry, self._last_tracking_error)
+            self.dashboard_panel.update_metrics_readout(self.metrics.finalize())
+        elif index == 1 and self._last_record is not None:
+            self.view3d_panel.update_frame(self._last_record)
 
     def start_run(self):
         cfg = self.config_panel.build_config()
@@ -184,10 +202,32 @@ class MainWindow(QMainWindow):
         )
         self.frame_log.add(record)
 
-        self.video_panel.show_frame(frame.image, telemetry)
-        self.dashboard_panel.update_from_telemetry(telemetry, tracking_error)
-        self.dashboard_panel.update_metrics_readout(self.metrics.finalize())
-        self.view3d_panel.update_frame(record)
+        # Cache the latest frame/telemetry/record so a tab switch can
+        # catch the now-visible panel up immediately (see
+        # _on_right_tab_changed) without waiting for the next tick.
+        self._last_frame = frame
+        self._last_telemetry = telemetry
+        self._last_tracking_error = tracking_error
+        self._last_record = record
+
+        # Only pay for real Qt/OpenGL repaint work on panels the user can
+        # actually see right now. The video feed sits in its own always-
+        # visible pane, but the 2D dashboard and 3D view share one tab
+        # widget -- only one of them is ever on screen. Rendering the
+        # hidden one every frame was pure waste, and on a machine without
+        # a proper GPU driver the 3D view's OpenGL repaint can silently
+        # fall back to slow software rendering and drag the whole step()
+        # loop with it even while the user is looking at the 2D tab. The
+        # real telemetry/metrics/frame data is still recorded above
+        # every frame regardless -- only the expensive repaint is skipped.
+        current_tab = self.right_tabs.currentIndex()
+        if self.video_panel.isVisible():
+            self.video_panel.show_frame(frame.image, telemetry)
+        if current_tab == 0:
+            self.dashboard_panel.update_from_telemetry(telemetry, tracking_error)
+            self.dashboard_panel.update_metrics_readout(self.metrics.finalize())
+        elif current_tab == 1:
+            self.view3d_panel.update_frame(record)
         self.statusBar().showMessage(f"frame {frame.frame_id}  lock={telemetry.lock_state}")
 
     def stop_run(self):
