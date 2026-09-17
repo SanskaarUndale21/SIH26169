@@ -24,8 +24,9 @@ def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(STYLESHEET)
     window = MainWindow(config)
+    window.setMinimumSize(1100, 680)
     window.resize(1500, 860)
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
 
 
