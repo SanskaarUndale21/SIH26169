@@ -46,5 +46,11 @@ class VideoPanel(QWidget):
 
         rgb = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
         qimg = QImage(rgb.data, w, h, rgb.strides[0], QImage.Format_RGB888)
-        pix = QPixmap.fromImage(qimg).scaled(self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # FastTransformation (nearest-neighbour) instead of
+        # SmoothTransformation (bilinear): real, measurable per-frame cost
+        # with no meaningful visual difference at the panel's typical
+        # display size, and one of the classic Qt real-time-rendering
+        # costs that only shows up with real window compositing, not in
+        # an offscreen benchmark.
+        pix = QPixmap.fromImage(qimg).scaled(self.label.size(), Qt.KeepAspectRatio, Qt.FastTransformation)
         self.label.setPixmap(pix)

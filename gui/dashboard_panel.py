@@ -112,16 +112,27 @@ class DashboardPanel(QWidget):
 
         outer = QVBoxLayout(self)
 
-        pg.setConfigOptions(antialias=True)
-        self.err_plot = pg.PlotWidget(title="Tracking error (px)")
+        # Real-time pyqtgraph performance recipe (antialiasing + per-frame
+        # auto-ranging are the two classic costs that don't show up in an
+        # offscreen/headless benchmark but dominate real windowed
+        # rendering -- this is what was actually behind the GUI's FPS
+        # reading staying under 20 despite the tracking engine itself
+        # running well above it): antialiasing off, mouse interaction off
+        # (skips its hit-testing overhead), and each plot's Y range fixed
+        # once to its known meaningful range instead of recomputed via
+        # auto-range on every single setData() call.
+        pg.setConfigOptions(antialias=False)
+
+        self.err_plot = self._make_plot("Tracking error (px)", "#e05252", y_range=(0, 15), threshold=10)
         self.err_curve = self.err_plot.plot(pen=pg.mkPen("#e05252", width=2))
         self.err_plot.addLine(y=10, pen=pg.mkPen("#888", style=Qt.DashLine))
 
-        self.fps_plot = pg.PlotWidget(title="FPS")
+        self.fps_plot = self._make_plot("FPS", "#4a90d9", y_range=(0, 60), threshold=20)
         self.fps_curve = self.fps_plot.plot(pen=pg.mkPen("#4a90d9", width=2))
         self.fps_plot.addLine(y=20, pen=pg.mkPen("#888", style=Qt.DashLine))
 
-        self.state_plot = pg.PlotWidget(title="Lock state (0=searching 1=acquiring 2=reacquiring 3=locked)")
+        self.state_plot = self._make_plot(
+            "Lock state (0=searching 1=acquiring 2=reacquiring 3=locked)", "#5cb85c", y_range=(0, 3))
         self.state_curve = self.state_plot.plot(pen=pg.mkPen("#5cb85c", width=2))
 
         outer.addWidget(self.err_plot, stretch=2)
@@ -142,6 +153,17 @@ class DashboardPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setMaximumHeight(220)
         outer.addWidget(scroll, stretch=1)
+
+    def _make_plot(self, title: str, color: str, y_range: tuple, threshold: float = None) -> pg.PlotWidget:
+        plot = pg.PlotWidget(title=title)
+        plot.setMouseEnabled(x=False, y=False)  # skip interaction hit-testing every frame
+        plot.hideButtons()
+        plot.setYRange(*y_range, padding=0)
+        plot.enableAutoRange(axis='y', enable=False)
+        plot.enableAutoRange(axis='x', enable=True)  # X (time) still needs to scroll with the run
+        plot.setDownsampling(mode='peak')
+        plot.setClipToView(True)
+        return plot
 
     def update_from_telemetry(self, telemetry, tracking_error):
         now = time.perf_counter()
