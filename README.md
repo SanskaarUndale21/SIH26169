@@ -44,10 +44,19 @@ python web/dashboard_server.py
 ## Run tests
 
 ```
-pytest tests/test_motion_models.py tests/test_detector.py tests/test_imm_tracker.py tests/test_control_loop.py
+pytest tests/                      # unit tests + robustness/stress tests
 python tests/benchmark_matrix.py   # Section 12 motion x disturbance matrix
 python tests/smoke_test.py         # quick headless end-to-end check
 ```
+
+`tests/test_robustness.py` runs the real `TrackingRunner` (not a mock)
+through conditions well outside a rehearsed demo: every disturbance
+stacked at its schema-legal maximum at once, a target faster than the
+configured PTZ can physically slew, tiny/huge screen and camera sizes,
+5 simultaneous targets, a ~2000-frame long-haul run under combined noise,
+and a target that is never detectable for the entire run -- checking the
+engine degrades to `searching`/`reacquiring` and reports finite metrics
+instead of crashing or dividing by zero.
 
 ## Architecture
 
@@ -73,13 +82,15 @@ in `perception/frame_source.py` and `perception/pipeline.py`:
   `static/pat_scene.js` (the live-control UI and its shared Three.js
   scene, also used by the replay page).
 - `config/param_schema.py` -- the single list of every tweakable
-  parameter (62 across scene/camera/target-motion/PTZ/disturbances/
+  parameter (63 across scene/camera/target-motion/PTZ/disturbances/
   detector/tracker/PID/link-budget/scenario-presets), consumed by
   *both* `gui/config_panel.py` and the web `/control` page so neither UI
   can silently expose a different knob set than the other.
 
 See `config/default_config.yaml` for every configurable parameter and its
-default, and `docs/` for the technical report and user manual outlines.
+default, `docs/` for the technical report and user manual, and
+`docs/demo_script.md` for a live-judging run-of-show, likely panel
+questions, and a fallback plan if something breaks mid-demo.
 
 ## Space-science relevance additions
 
@@ -103,6 +114,41 @@ default, and `docs/` for the technical report and user manual outlines.
 
 See `docs/technical_report.md` Section 11 for the full writeup and the
 formulas behind each.
+
+## How this matches real FSOC/PAT practice
+
+This isn't just a simulator with plausible-looking numbers -- the core
+formulas and architecture line up with how real free-space-optical
+pointing-acquisition-tracking (PAT) systems are actually built:
+
+- **Two-stage PAT architecture.** Real FSOC terminals split pointing into
+  a coarse stage (gimbal, wide field of view, camera/beacon feedback) and
+  a fine stage (fast steering mirror, narrow field of view, quadrant
+  detector), with reported accuracies around ±1-1.6 mrad (3σ) coarse and
+  ±80 µrad (3σ) fine. Our `fine_stage_capture_range_urad` default (500
+  µrad) sits between those two regimes -- a realistic coarse-to-fine
+  handoff threshold, not an arbitrary number.
+- **Pointing-loss formula.** `simulator/link_budget.py`'s
+  `L_dB = 8.686 * (theta / theta_divergence)^2` is the standard Gaussian-
+  beam boresight pointing-loss result used in deep-space and LEO optical
+  link budgets, not an invented curve.
+- **IMM tracking.** Interacting Multiple Model estimation is a
+  well-established maneuvering-target-tracking technique from radar/
+  missile-guidance practice, applied here to the coarse camera's centroid
+  so one estimator robustly handles straight-line, turning, and erratic
+  target motion.
+- **Camera-based coarse centroiding.** DoG-filtered point-source
+  detection + adaptive thresholding + intensity centroiding matches how
+  real CCD-based coarse tracking assemblies extract a beacon position
+  (reported figures: ~120 µrad accuracy at up to 100 FPS with ROI
+  readout). Our 20 FPS floor is deliberately framed as a *minimum
+  acceptable* threshold, not a target -- real coarse trackers commonly run
+  well above it.
+
+The 2s acquisition-time, 10px tracking-error, and 95% lock-retention
+thresholds (Section 10) are reasonable engineering targets for this
+project, not figures drawn from a specific paper -- worth being upfront
+about that distinction if asked.
 
 ## Known characteristics / tuning notes
 
