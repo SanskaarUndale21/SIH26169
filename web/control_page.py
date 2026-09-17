@@ -16,92 +16,116 @@ CONTROL_HTML = r"""<!doctype html>
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0b0d12; --surface: #12141a; --surface-raised: #171a21;
-    --border: #242833; --border-light: #2e3340;
-    --text: #e6e8ec; --text-muted: #8b90a0; --text-faint: #5b6070;
-    --accent: #3b82f6; --accent-hover: #2563eb; --accent-text: #93c5fd;
-    --ok: #22c55e; --ok-text: #4ade80; --bad: #ef4444; --bad-text: #f87171; --warn: #eab308;
+    /* Graphite material + one warm accent (copper), pewter for
+       processing-only states -- kept out of the pass/fail vocabulary
+       below on purpose: --ok/--bad stay red/green because those encode
+       an actual Section 10 pass/fail result, a real semantic a viewer
+       already reads correctly; --accent is reserved for "this is live/
+       primary," never reused for status. */
+    --bg: #0a0a0c; --surface: rgba(19, 19, 22, 0.72); --surface-solid: #131316;
+    --surface-raised: rgba(255,255,255,0.045);
+    --border: rgba(217, 138, 79, 0.16); --border-light: rgba(217, 138, 79, 0.32);
+    --text: #ece8e2; --text-muted: rgba(184, 188, 196, 0.75); --text-faint: rgba(107, 110, 117, 0.7);
+    --accent: #d98a4f; --accent-bright: #ffb066; --accent-dim: #8a5230;
+    --accent-wash: rgba(217, 138, 79, 0.14); --accent-glow: rgba(217, 138, 79, 0.35);
+    --pewter: #93a1b0; --pewter-bright: #c3ccd6; --pewter-wash: rgba(147, 161, 176, 0.16);
+    --ok: #7fb08a; --ok-text: #9fd4aa; --bad: #c9634f; --bad-text: #e8ab9d; --warn: #d9a94f;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
-               font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+               font-family: "Segoe UI Semibold", "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
                height: 100%; overflow: hidden; }
-  header { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface);
-           display: flex; align-items: center; gap: 16px; }
+  body {
+    background-image:
+      radial-gradient(circle at 15% 15%, rgba(217,138,79,0.06) 0%, transparent 40%),
+      radial-gradient(circle at 85% 80%, rgba(147,161,176,0.05) 0%, transparent 45%);
+  }
+  header { padding: 12px 22px; border-bottom: 1px solid var(--border); background: rgba(15,15,17,0.9);
+           backdrop-filter: blur(20px); display: flex; align-items: center; gap: 16px; }
   header .title-block { display: flex; flex-direction: column; gap: 1px; }
-  header h1 { margin: 0; font-size: 15px; font-weight: 700; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: 0.02em; }
   header .subtitle { font-size: 11px; color: var(--text-muted); }
   header .spacer { flex: 1; }
-  .nav-link { font-size: 13px; color: var(--accent-text); text-decoration: none; font-weight: 500; }
+  .nav-link { font-size: 13px; color: var(--accent-bright); text-decoration: none; font-weight: 600; }
   .nav-link:hover { text-decoration: underline; }
-  #status-badge { font-size: 11px; padding: 4px 12px; border-radius: 12px; font-weight: 700; letter-spacing: 0.03em; }
-  .status-idle { background: var(--border); color: var(--text-muted); }
-  .status-live { background: #0f2a1a; color: var(--ok-text); border: 1px solid var(--ok); }
-  .status-error { background: #2a1414; color: var(--bad-text); border: 1px solid var(--bad); }
-  button.action { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border-light);
-                   border-radius: 6px; padding: 8px 18px; font-size: 13px; cursor: pointer; font-weight: 600;
-                   transition: background 0.12s, border-color 0.12s; }
-  button.action:hover:not(:disabled) { border-color: var(--accent); }
-  button.action:disabled { background: var(--surface); color: var(--text-faint); border-color: var(--border); cursor: default; }
-  button.action:not(.stop):not(:disabled) { background: var(--accent); border-color: var(--accent); color: white; }
-  button.action:not(.stop):not(:disabled):hover { background: var(--accent-hover); }
-  button.action.stop:not(:disabled) { border-color: var(--bad); color: var(--bad-text); }
-  button.action.stop:not(:disabled):hover { background: #241414; }
+  #status-badge { font-size: 10px; padding: 5px 13px; border-radius: 100px; font-weight: 700; letter-spacing: 0.08em;
+                  text-transform: uppercase; border: 1px solid transparent; }
+  .status-idle { background: rgba(255,255,255,0.06); color: var(--text-muted); }
+  .status-live { background: var(--accent-wash); color: var(--accent-bright); border-color: var(--border-light);
+                 box-shadow: 0 0 12px var(--accent-glow); }
+  .status-error { background: rgba(201,99,79,0.14); color: var(--bad-text); border-color: rgba(201,99,79,0.4); }
+  button.action { background: rgba(255,255,255,0.045); color: var(--text); border: 1px solid rgba(255,255,255,0.1);
+                   border-radius: 10px; padding: 8px 18px; font-size: 13px; cursor: pointer; font-weight: 700;
+                   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s; }
+  button.action:hover:not(:disabled) { transform: translateY(-1px); }
+  button.action:active:not(:disabled) { transform: scale(0.97); }
+  button.action:disabled { background: rgba(255,255,255,0.02); color: var(--text-faint); border-color: rgba(255,255,255,0.05); cursor: default; }
+  button.action:not(.stop):not(:disabled) { background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+      border-color: var(--accent); color: #14100b; box-shadow: 0 4px 16px var(--accent-glow); }
+  button.action:not(.stop):not(:disabled):hover { box-shadow: 0 6px 22px var(--accent-glow); }
+  button.action.stop:not(:disabled) { border-color: rgba(201,99,79,0.5); color: var(--bad-text); }
+  button.action.stop:not(:disabled):hover { background: rgba(201,99,79,0.14); }
 
   main { display: grid; grid-template-columns: 380px 1fr 320px; height: calc(100vh - 57px); }
   #config-col { border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column;
-                background: var(--surface); }
+                background: var(--surface-solid); }
   #source-box { padding: 14px 16px; border-bottom: 1px solid var(--border); }
-  #source-box > label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;
-                          letter-spacing: 0.04em; }
-  #source-box select, #source-box input[type=file] { width: 100%; margin-top: 6px; background: var(--surface-raised);
-      color: var(--text); border: 1px solid var(--border-light); border-radius: 5px; padding: 6px 8px; font-size: 12px; }
+  #source-box > label { font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;
+                          letter-spacing: 0.06em; }
+  #source-box select, #source-box input[type=file] { width: 100%; margin-top: 6px; background: rgba(255,255,255,0.045);
+      color: var(--text); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 7px 9px; font-size: 12px; }
   #config-body { flex: 1; display: flex; overflow: hidden; }
-  #tab-buttons { width: 130px; overflow-y: auto; border-right: 1px solid var(--border);
+  #tab-buttons { width: 132px; overflow-y: auto; border-right: 1px solid var(--border);
                  padding: 6px 0; flex-shrink: 0; }
   #tab-buttons button { display: block; width: 100%; text-align: left; background: transparent;
       color: var(--text-muted); border: none; border-left: 2px solid transparent; padding: 9px 12px;
-      font-size: 12px; cursor: pointer; }
-  #tab-buttons button.active { background: var(--surface-raised); color: var(--text); border-left-color: var(--accent); }
-  #tab-buttons button:hover:not(.active) { background: var(--surface-raised); color: var(--text); }
+      font-size: 12px; cursor: pointer; transition: background 0.12s, color 0.12s; }
+  #tab-buttons button.active { background: rgba(255,255,255,0.05); color: var(--accent-bright); border-left-color: var(--accent); }
+  #tab-buttons button:hover:not(.active) { background: rgba(255,255,255,0.03); color: var(--text); }
   #tab-panels { flex: 1; overflow-y: auto; padding: 14px 18px; }
   .param-row { margin: 0 0 14px; }
   .param-row label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 5px; font-weight: 500; }
   .param-row .row-inputs { display: flex; align-items: center; gap: 10px; }
   .param-row input[type=range] { flex: 1; accent-color: var(--accent); }
-  .param-row input[type=number] { width: 72px; background: var(--surface-raised); color: var(--text);
-      border: 1px solid var(--border-light); border-radius: 5px; padding: 4px 6px; font-size: 12px; }
-  .param-row select { width: 100%; background: var(--surface-raised); color: var(--text);
-      border: 1px solid var(--border-light); border-radius: 5px; padding: 5px 8px; font-size: 12px; }
+  .param-row input[type=number] { width: 72px; background: rgba(255,255,255,0.045); color: var(--text);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+  .param-row select { width: 100%; background: rgba(255,255,255,0.045); color: var(--text);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
   .param-row input[type=checkbox] { transform: scale(1.25); accent-color: var(--accent); }
 
   #center-col { position: relative; background: var(--bg); }
   #canvas-holder { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-  #legend { position: absolute; top: 12px; right: 16px; font-size: 11px; background: rgba(18,20,26,0.85);
-            border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; backdrop-filter: blur(4px); }
-  #legend div { margin: 3px 0; }
+  #legend { position: absolute; top: 12px; right: 16px; font-size: 11px; background: rgba(19,19,22,0.75);
+            border: 1px solid var(--border); border-radius: 12px; padding: 12px 15px; backdrop-filter: blur(16px) saturate(1.3); }
+  #legend div { margin: 4px 0; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
   #frame-readout { position: absolute; bottom: 12px; left: 16px; font-size: 11px; color: var(--text-muted);
-      background: rgba(18,20,26,0.85); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
-      backdrop-filter: blur(4px); font-family: "SF Mono", Consolas, monospace; }
+      background: rgba(19,19,22,0.75); border: 1px solid var(--border); border-radius: 12px; padding: 8px 13px;
+      backdrop-filter: blur(16px) saturate(1.3); font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; }
 
-  #right-col { overflow-y: auto; padding: 16px; background: var(--surface); }
+  #right-col { overflow-y: auto; padding: 16px; background: var(--surface-solid); }
   .chart-title { font-size: 10px; color: var(--text-muted); margin: 14px 0 6px; text-transform: uppercase;
-                 letter-spacing: 0.05em; font-weight: 600; }
+                 letter-spacing: 0.06em; font-weight: 700; }
   .chart-title:first-child { margin-top: 0; }
-  canvas.chart { width: 100%; height: 84px; background: var(--bg); border: 1px solid var(--border);
-                 border-radius: 8px; display: block; }
+  canvas.chart { width: 100%; height: 84px; background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+                 border-radius: 10px; display: block; }
   #cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .metric-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px;
-                 padding: 10px 12px; }
+  .metric-card { background: rgba(255,255,255,0.035); border: 1px solid var(--border); border-radius: 10px;
+                 padding: 10px 12px; transition: border-color 0.15s; }
   .metric-card .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
   .metric-card .value { font-size: 17px; font-weight: 700; margin-top: 3px; }
+  .metric-card.ok { border-color: rgba(127,176,138,0.35); }
   .metric-card.ok .value { color: var(--ok-text); }
+  .metric-card.bad { border-color: rgba(201,99,79,0.4); }
   .metric-card.bad .value { color: var(--bad-text); }
   .metric-card.na .value { color: var(--text-faint); }
-  #result-box { padding: 12px 14px; margin-top: 10px; background: #0f2a1a; border: 1px solid var(--ok);
-                border-radius: 8px; font-size: 12px; line-height: 1.5; display: none; }
-  #result-box a { color: var(--accent-text); font-weight: 600; }
+  #result-box { padding: 12px 14px; margin-top: 10px; background: rgba(127,176,138,0.1); border: 1px solid rgba(127,176,138,0.35);
+                border-radius: 10px; font-size: 12px; line-height: 1.5; display: none; }
+  #result-box a { color: var(--accent-bright); font-weight: 700; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 </style>
 </head>
 <body>
@@ -135,7 +159,7 @@ CONTROL_HTML = r"""<!doctype html>
   <div id="center-col">
     <div id="canvas-holder"></div>
     <div id="legend">
-      <div><span class="dot" style="background:#3b82f6"></span>Cone = camera boresight (real pan/tilt)</div>
+      <div><span class="dot" style="background:#d98a4f"></span>Cone = camera boresight (real pan/tilt)</div>
       <div><span class="dot" style="background:#4ade80"></span>Ground truth target</div>
       <div><span class="dot" style="background:#facc15"></span>Tracker estimate</div>
       <div style="margin-top:6px;color:#5b6070;">Cone colour = lock state:</div>

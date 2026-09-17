@@ -1,37 +1,54 @@
 """One shared dark theme for the desktop GUI, applied once via
 QApplication.setStyleSheet() at startup (main.py). Consistent palette,
 typography, spacing, and hover/focus states across every widget instead
-of Qt's default platform styling -- this file is the single place that
-palette lives, so every panel (config, video, dashboard, 3D) reads as
-one designed product rather than a pile of default-styled widgets.
+of Qt's default platform styling.
+
+Material language borrowed from a reference "instrument panel" design
+(graphite base + a single warm accent + glow, not a flat generic-blue
+Bootstrap look): deep graphite backgrounds, one accent colour used for
+every interactive/positive state (copper), pewter for
+processing/neutral-busy states, glow via border colour + a drop-shadow
+effect applied in code (gui/main_window.py) since Qt Widgets has no CSS
+backdrop-filter/box-shadow equivalent -- QSS approximates the "glass
+panel" look with layered flat surface colours and coloured borders
+instead of real blur.
 
 Palette mirrors web/control_page.py's dark theme so the desktop app and
-the browser control page look like the same product, not two unrelated
-UIs -- same background/surface/border/accent/status colours.
+the browser control page read as the same product.
 """
 from __future__ import annotations
 
-# --- Palette (kept in one place so both this stylesheet and any
-# programmatic colour use -- e.g. gui/dashboard_panel.py's metric-card
-# verdict colours -- can reference the same values) ---
-BG = "#0b0d12"
-SURFACE = "#12141a"
-SURFACE_RAISED = "#171a21"
-BORDER = "#242833"
-BORDER_LIGHT = "#2e3340"
-TEXT = "#e6e8ec"
-TEXT_MUTED = "#8b90a0"
-TEXT_FAINT = "#5b6070"
-ACCENT = "#3b82f6"
-ACCENT_HOVER = "#2563eb"
-ACCENT_TEXT = "#93c5fd"
-OK = "#22c55e"
-OK_TEXT = "#4ade80"
-BAD = "#ef4444"
-BAD_TEXT = "#f87171"
-WARN = "#eab308"
+# --- Palette ---
+BG = "#0a0a0c"
+SURFACE = "#131316"
+SURFACE_RAISED = "#191a1e"
+BORDER = "#2a241d"
+BORDER_LIGHT = "#3a2f22"
+TEXT = "#ece8e2"
+TEXT_MUTED = "#b8bcc4"
+TEXT_FAINT = "#6b6e75"
 
-FONT_FAMILY = '"Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif'
+# The one accent: molten copper (replaces a generic blue) -- used for
+# every "engaged / positive / primary action" state.
+ACCENT = "#d98a4f"
+ACCENT_BRIGHT = "#ffb066"
+ACCENT_DIM = "#8a5230"
+ACCENT_WASH = "rgba(217, 138, 79, 0.14)"
+
+# Secondary functional hue: pewter, for "processing / busy" only -- never
+# used for a primary action, so accent colour alone always tells you
+# what's interactive vs. what's just status.
+PEWTER = "#93a1b0"
+PEWTER_BRIGHT = "#c3ccd6"
+
+OK = "#7fb08a"
+OK_TEXT = "#9fd4aa"
+BAD = "#c9634f"
+BAD_TEXT = "#e8ab9d"
+WARN = "#d9a94f"
+
+FONT_FAMILY = '"Segoe UI Semibold", "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif'
+MONO_FAMILY = '"Consolas", "SF Mono", monospace'
 
 STYLESHEET = f"""
 * {{
@@ -44,20 +61,16 @@ QMainWindow, QWidget {{
     background-color: {BG};
 }}
 
-QWidget#leftPane, QWidget#centerPane {{
-    background-color: {BG};
-}}
-
 QWidget#headerBar {{
     background-color: {SURFACE};
     border-bottom: 1px solid {BORDER};
 }}
 
-/* --- Group boxes (config panel sections) --- */
+/* --- Group boxes --- */
 QGroupBox {{
     background-color: {SURFACE};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: 10px;
     margin-top: 10px;
     padding: 14px 10px 10px 10px;
     font-weight: 600;
@@ -75,7 +88,7 @@ QGroupBox::title {{
 /* --- Tabs --- */
 QTabWidget::pane {{
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: 10px;
     background-color: {SURFACE};
     top: -1px;
 }}
@@ -86,13 +99,13 @@ QTabBar::tab {{
     margin-right: 2px;
     border: 1px solid transparent;
     border-bottom: none;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
     font-weight: 500;
 }}
 QTabBar::tab:selected {{
     background-color: {SURFACE};
-    color: {TEXT};
+    color: {ACCENT_BRIGHT};
     border: 1px solid {BORDER};
     border-bottom: 2px solid {ACCENT};
 }}
@@ -112,13 +125,14 @@ QPushButton {{
     background-color: {SURFACE_RAISED};
     color: {TEXT};
     border: 1px solid {BORDER_LIGHT};
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 8px 18px;
     font-weight: 600;
 }}
 QPushButton:hover {{
     background-color: {BORDER_LIGHT};
     border-color: {ACCENT};
+    color: {ACCENT_BRIGHT};
 }}
 QPushButton:pressed {{
     background-color: {BORDER};
@@ -131,21 +145,22 @@ QPushButton:disabled {{
 QPushButton#startBtn {{
     background-color: {ACCENT};
     border-color: {ACCENT};
-    color: white;
+    color: #14100b;
+    font-weight: 700;
 }}
-QPushButton#startBtn:hover {{ background-color: {ACCENT_HOVER}; }}
+QPushButton#startBtn:hover {{ background-color: {ACCENT_BRIGHT}; }}
 QPushButton#stopBtn {{
     background-color: {SURFACE_RAISED};
     border-color: {BAD};
     color: {BAD_TEXT};
 }}
-QPushButton#stopBtn:hover {{ background-color: #241414; }}
+QPushButton#stopBtn:hover {{ background-color: #2a1714; }}
 
-/* --- Inputs: combo/spin/slider/checkbox --- */
+/* --- Inputs --- */
 QComboBox, QSpinBox, QDoubleSpinBox {{
     background-color: {SURFACE_RAISED};
     border: 1px solid {BORDER_LIGHT};
-    border-radius: 5px;
+    border-radius: 6px;
     padding: 4px 8px;
     min-height: 22px;
 }}
@@ -159,7 +174,8 @@ QComboBox::drop-down {{
 QComboBox QAbstractItemView {{
     background-color: {SURFACE_RAISED};
     border: 1px solid {BORDER_LIGHT};
-    selection-background-color: {ACCENT};
+    selection-background-color: {ACCENT_DIM};
+    selection-color: {ACCENT_BRIGHT};
     color: {TEXT};
 }}
 QSpinBox::up-button, QSpinBox::down-button,
@@ -179,14 +195,14 @@ QSlider::sub-page:horizontal {{
     border-radius: 2px;
 }}
 QSlider::handle:horizontal {{
-    background: {TEXT};
+    background: {ACCENT_BRIGHT};
     width: 14px;
     height: 14px;
     margin: -5px 0;
     border-radius: 7px;
 }}
 QSlider::handle:horizontal:hover {{
-    background: {ACCENT_TEXT};
+    background: {TEXT};
 }}
 
 QCheckBox {{
@@ -222,7 +238,7 @@ QListWidget#groupList::item {{
 }}
 QListWidget#groupList::item:selected {{
     background-color: {SURFACE_RAISED};
-    color: {TEXT};
+    color: {ACCENT_BRIGHT};
     border-left: 2px solid {ACCENT};
 }}
 QListWidget#groupList::item:hover:!selected {{
@@ -249,7 +265,7 @@ QScrollBar::handle:vertical {{
     min-height: 24px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background: {TEXT_FAINT};
+    background: {ACCENT_DIM};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
@@ -261,6 +277,7 @@ QStatusBar {{
     border-top: 1px solid {BORDER};
     color: {TEXT_MUTED};
     font-size: 12px;
+    font-family: {MONO_FAMILY};
 }}
 
 /* --- Splitter handle --- */

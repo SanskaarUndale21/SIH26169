@@ -122,18 +122,26 @@ class MainWindow(QMainWindow):
         self._reset_runtime_state()
 
     def _set_status_badge(self, state: str):
+        # Copper = engaged/locked (the one accent, reserved for a
+        # genuinely good state), pewter = processing/searching/acquiring
+        # (busy, not bad), muted red-brown = idle-but-was-an-error. Same
+        # two-hue-plus-neutral convention as gui/theme.py's palette --
+        # state is read from colour intensity, not a different colour
+        # per state.
         colors = {
-            "idle": ("#242833", "#8b90a0"),
-            "running": ("#0f2a1a", "#4ade80"),
-            "locked": ("#0f2a1a", "#4ade80"),
-            "searching": ("#2a1414", "#f87171"),
-            "acquiring": ("#2a2410", "#facc15"),
+            "idle": ("#1e1a15", "#6b6e75"),
+            "running": ("rgba(217, 138, 79, 0.16)", "#ffb066"),
+            "locked": ("rgba(217, 138, 79, 0.16)", "#ffb066"),
+            "searching": ("rgba(147, 161, 176, 0.14)", "#c3ccd6"),
+            "acquiring": ("rgba(147, 161, 176, 0.14)", "#c3ccd6"),
+            "reacquiring": ("rgba(147, 161, 176, 0.14)", "#c3ccd6"),
         }
         bg, fg = colors.get(state, colors["idle"])
         self.status_badge.setText(state.upper())
+        self.status_badge.setFixedHeight(26)
         self.status_badge.setStyleSheet(
             f"background: {bg}; color: {fg}; border: 1px solid {fg}; "
-            f"border-radius: 12px; padding: 5px 12px; font-size: 11px; font-weight: 700;"
+            f"border-radius: 13px; padding: 0 12px; font-size: 11px; font-weight: 700; letter-spacing: 1px;"
         )
 
     def _reset_runtime_state(self):

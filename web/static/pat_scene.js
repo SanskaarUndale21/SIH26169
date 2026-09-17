@@ -61,7 +61,7 @@ export function createPATScene(holderElement) {
   coneGeo.rotateX(Math.PI / 2);
   coneGeo.translate(0, 0, DISPLAY_RANGE * 0.45);
   const coneMat = new THREE.MeshStandardMaterial({
-    color: 0x3b82f6, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
+    color: 0xd98a4f, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
   });
   const coneMesh = new THREE.Mesh(coneGeo, coneMat);
   scene.add(coneMesh);
@@ -85,7 +85,7 @@ export function createPATScene(holderElement) {
     return line;
   }
   const targetTrail = makeTrail(0x4ade80);
-  const camTrail = makeTrail(0x3b82f6);
+  const camTrail = makeTrail(0xd98a4f);
 
   function pushTrail(line, point) {
     const pts = line.userData.points;

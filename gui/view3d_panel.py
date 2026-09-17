@@ -104,7 +104,7 @@ class View3DPanel(QWidget):
         # Camera pointing cone (real gimbal direction)
         cone_mesh = gl.MeshData.cylinder(rows=4, cols=32, radius=[0.001, 40.0], length=DISPLAY_RANGE * 0.9)
         self.cone_item = gl.GLMeshItem(meshdata=cone_mesh, smooth=False, shader="shaded",
-                                        color=(0.3, 0.5, 0.9, 0.35), drawEdges=True)
+                                        color=(0.851, 0.541, 0.310, 0.35), drawEdges=True)
         self.gl_view.addItem(self.cone_item)
 
         # Ground-truth target marker (real simulator position)
@@ -120,7 +120,7 @@ class View3DPanel(QWidget):
         # Trails: real target path and real camera-boresight path
         self.target_trail = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(0.2, 0.9, 0.3, 0.5), width=2)
         self.gl_view.addItem(self.target_trail)
-        self.cam_trail = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(0.3, 0.5, 0.9, 0.5), width=2)
+        self.cam_trail = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(0.851, 0.541, 0.310, 0.5), width=2)
         self.gl_view.addItem(self.cam_trail)
 
         self._target_history: deque = deque(maxlen=TRAIL_MAX_POINTS)
