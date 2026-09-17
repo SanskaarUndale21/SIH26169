@@ -13,7 +13,11 @@ from PySide6.QtWidgets import (QGridLayout, QLabel, QScrollArea, QVBoxLayout, QW
 
 LOCK_STATE_CODE = {"searching": 0, "acquiring": 1, "reacquiring": 2, "locked": 3}
 
-# Section 10 hard performance targets: (comparison, threshold, unit)
+# Section 10 hard performance targets: (comparison, threshold, unit).
+# Only metrics with an actual pass/fail target from the spec belong here
+# -- everything else (link-budget additions, RMSE, event counts) has no
+# hard threshold to colour-code against, but still needs a unit shown so
+# the card isn't a bare, context-free number. See UNITS below for those.
 THRESHOLDS = {
     "acquisition_time_sec": ("<=", 2.0, "s"),
     "avg_tracking_error_px": ("<=", 10.0, "px"),
@@ -22,6 +26,27 @@ THRESHOLDS = {
     "lock_retention_rate": (">=", 0.95, ""),
     "processing_time_per_frame_ms": ("<=", 50.0, "ms"),
 }
+
+# Units for metrics that don't have a hard Section 10 threshold (so they
+# aren't colour-coded pass/fail) but still need a unit label rather than
+# showing as a bare, unlabelled number -- this was the actual cause of
+# cards like "Max pointing loss: 60.00" or "Handoff-ready rate: 0.950"
+# rendering with no unit at all in an earlier screenshot.
+UNITS = {
+    "simulation_duration_sec": "s",
+    "rmse_px": "px",
+    "avg_angular_error_urad": "µrad",
+    "max_angular_error_urad": "µrad",
+    "avg_pointing_loss_db": "dB",
+    "max_pointing_loss_db": "dB",
+    "handoff_ready_rate": "%",
+    "time_to_handoff_ready_sec": "s",
+    "re_acquisition_count": "",
+}
+# handoff_ready_rate and lock_retention_rate are stored as 0-1 fractions;
+# format them as a percentage rather than a bare decimal ("0.950" reads
+# as a mysterious tiny number, "95.0%" reads immediately).
+PERCENT_KEYS = {"handoff_ready_rate", "lock_retention_rate"}
 
 METRIC_LABELS = {
     "simulation_duration_sec": "Sim duration",
@@ -54,13 +79,15 @@ def _verdict(key: str, val) -> str:
     return "ok" if ok else "bad"
 
 
-def _fmt(val, unit: str) -> str:
+def _fmt(key: str, val, unit: str) -> str:
     if val is None:
         return "N/A"
     if isinstance(val, list):
         return f"{len(val)} event(s)"
     if isinstance(val, bool):
         return "yes" if val else "no"
+    if key in PERCENT_KEYS and isinstance(val, (int, float)):
+        return f"{val * 100:.1f}%"
     if isinstance(val, (int, float)):
         s = f"{val:.3f}" if abs(val) < 10 else f"{val:.2f}"
         return f"{s} {unit}".strip()
@@ -85,11 +112,13 @@ class MetricCard(QLabel):
         self.set_value(None)
 
     def set_value(self, val):
-        unit = THRESHOLDS.get(self.key, (None, None, ""))[2]
+        unit = THRESHOLDS.get(self.key, (None, None, None))[2]
+        if unit is None:
+            unit = UNITS.get(self.key, "")
         verdict = _verdict(self.key, val)
         bg, border, text_color = self.COLORS[verdict]
         label = METRIC_LABELS.get(self.key, self.key.replace("_", " "))
-        value_str = _fmt(val, unit)
+        value_str = _fmt(self.key, val, unit)
         self.setStyleSheet(
             f"QLabel {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; "
             f"padding: 8px 12px; }}"

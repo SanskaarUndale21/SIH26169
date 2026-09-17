@@ -44,13 +44,20 @@ export function createPATScene(holderElement) {
   dirLight.position.set(200, 400, -200);
   scene.add(dirLight);
 
+  // A single backdrop grid at the display range, standing in for "the
+  // plane the target moves on" -- gives the scene a sense of depth/scale
+  // without needing a literal 3D world (this simulator is 2D). No
+  // world-origin axes helper: three unlabelled coloured lines sitting
+  // right where the camera cone's apex also is just reads as clutter to
+  // a non-technical viewer, with nothing on screen saying which axis is
+  // which -- removed rather than explained, since it added no
+  // information the grid + orbit controls don't already convey.
   const grid = new THREE.GridHelper(800, 16, 0x334155, 0x1e293b);
   grid.rotation.x = Math.PI / 2;
   grid.position.z = DISPLAY_RANGE;
   scene.add(grid);
-  scene.add(new THREE.AxesHelper(150));
 
-  const coneGeo = new THREE.ConeGeometry(40, DISPLAY_RANGE * 0.9, 24, 1, true);
+  const coneGeo = new THREE.ConeGeometry(40, DISPLAY_RANGE * 0.9, 32, 1, true);
   coneGeo.rotateX(Math.PI / 2);
   coneGeo.translate(0, 0, DISPLAY_RANGE * 0.45);
   const coneMat = new THREE.MeshStandardMaterial({

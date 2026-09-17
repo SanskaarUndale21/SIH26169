@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                 QFormLayout, QGroupBox, QHBoxLayout, QLabel,
                                 QListWidget, QListWidgetItem, QPushButton, QScrollArea,
-                                QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+                                QSizePolicy, QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from config.param_schema import GROUP_ORDER, PARAM_SCHEMA, flatten_config_to_ui_values, get_path
 
@@ -32,10 +32,21 @@ class _NumericRow(QWidget):
     def __init__(self, param, parent=None):
         super().__init__(parent)
         self.param = param
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.slider = QSlider(Qt.Horizontal)
+        # QFormLayout sizes its field column from each widget's own
+        # sizeHint() unless told otherwise -- a bare QSlider's sizeHint is
+        # tiny (Qt has no concept of "this slider is meant to be the wide
+        # element in the row"), so without an explicit Expanding policy
+        # and a real minimum width, the whole slider+spinbox row collapses
+        # to just wide enough for the spinbox, leaving the slider
+        # rendered as a barely-visible sliver next to the label instead
+        # of a usable drag control.
+        self.slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.slider.setMinimumWidth(140)
         is_int = param.kind == "int"
         scale = 1 if is_int else max(1, int(round(1 / (param.step or 0.1))))
         self._scale = scale
@@ -120,7 +131,14 @@ class ConfigPanel(QWidget):
         body.setSpacing(0)
         self.group_list = QListWidget()
         self.group_list.setObjectName("groupList")
-        self.group_list.setFixedWidth(150)
+        self.group_list.setFixedWidth(178)
+        # Wrap long group names ("Motion: Straight Line") onto a second
+        # line instead of letting Qt grow a horizontal scrollbar to fit
+        # them -- a horizontal scrollbar on a vertical nav list reads as
+        # broken, and eliding the text would hide which motion type a
+        # tab actually is.
+        self.group_list.setWordWrap(True)
+        self.group_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.stack = QStackedWidget()
 
         by_group: dict = {}
@@ -136,6 +154,12 @@ class ConfigPanel(QWidget):
             form = QFormLayout(tab)
             form.setSpacing(10)
             form.setContentsMargins(12, 12, 12, 12)
+            # Explicit growth policy: without this, QFormLayout's field
+            # column can size to each row's minimum sizeHint on some
+            # platforms instead of filling the available width, which is
+            # the other half of why sliders were rendering squeezed down
+            # to a sliver (see _NumericRow's own size-policy fix above).
+            form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
             for p in params:
                 key = "/".join(str(k) for k in p.path)
                 current = ui_values.get(key, p.default)

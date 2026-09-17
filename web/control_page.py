@@ -135,11 +135,13 @@ CONTROL_HTML = r"""<!doctype html>
   <div id="center-col">
     <div id="canvas-holder"></div>
     <div id="legend">
+      <div><span class="dot" style="background:#3b82f6"></span>Cone = camera boresight (real pan/tilt)</div>
       <div><span class="dot" style="background:#4ade80"></span>Ground truth target</div>
       <div><span class="dot" style="background:#facc15"></span>Tracker estimate</div>
-      <div><span class="dot" style="background:#ef4444"></span>Lock: searching</div>
-      <div><span class="dot" style="background:#eab308"></span>Lock: acquiring/reacquiring</div>
-      <div><span class="dot" style="background:#22c55e"></span>Lock: locked</div>
+      <div style="margin-top:6px;color:#5b6070;">Cone colour = lock state:</div>
+      <div><span class="dot" style="background:#ef4444"></span>Searching</div>
+      <div><span class="dot" style="background:#eab308"></span>Acquiring / reacquiring</div>
+      <div><span class="dot" style="background:#22c55e"></span>Locked</div>
     </div>
     <div id="frame-readout">No live data yet. Press Start.</div>
   </div>
@@ -160,12 +162,34 @@ CONTROL_HTML = r"""<!doctype html>
 <script type="module">
 import { createPATScene } from "/static/pat_scene.js";
 
+// Metrics with an actual Section 10 pass/fail target -- colour-coded.
 const THRESHOLDS = {
   acquisition_time_sec: {op: "<=", val: 2.0, unit: "s"},
   avg_tracking_error_px: {op: "<=", val: 10.0, unit: "px"},
   max_tracking_error_px: {op: "<=", val: 10.0, unit: "px"},
   fps: {op: ">=", val: 20.0, unit: "FPS"},
   lock_retention_rate: {op: ">=", val: 0.95, unit: ""},
+  processing_time_per_frame_ms: {op: "<=", val: 50.0, unit: "ms"},
+};
+// Units for metrics with no hard threshold, so cards like "Max pointing
+// loss" or "Handoff-ready rate" still show a real unit instead of a
+// bare, context-free number (the actual bug in an earlier screenshot).
+const UNITS = {
+  simulation_duration_sec: "s", rmse_px: "px",
+  avg_angular_error_urad: "µrad", max_angular_error_urad: "µrad",
+  avg_pointing_loss_db: "dB", max_pointing_loss_db: "dB",
+  handoff_ready_rate: "%", time_to_handoff_ready_sec: "s",
+};
+const PERCENT_KEYS = new Set(["handoff_ready_rate", "lock_retention_rate"]);
+const LABELS = {
+  simulation_duration_sec: "Sim duration", fps: "FPS", acquisition_time_sec: "Acquisition time",
+  avg_tracking_error_px: "Avg tracking error", max_tracking_error_px: "Max tracking error",
+  lock_retention_rate: "Lock retention", processing_time_per_frame_ms: "Proc. time/frame",
+  rmse_px: "RMSE", re_acquisition_count: "Re-acquisitions",
+  avg_angular_error_urad: "Avg angular error", max_angular_error_urad: "Max angular error",
+  avg_pointing_loss_db: "Avg pointing loss", max_pointing_loss_db: "Max pointing loss",
+  handoff_ready_rate: "Handoff-ready rate", time_to_handoff_ready_sec: "Time to handoff-ready",
+  re_acquisition_times_sec: "Re-acquisition times", target_loss_events: "Target loss events",
 };
 
 const patScene = createPATScene(document.getElementById("canvas-holder"));
@@ -333,9 +357,10 @@ function verdict(key, val) {
   const ok = t.op === "<=" ? val <= t.val : val >= t.val;
   return ok ? "ok" : "bad";
 }
-function fmtVal(val, unit) {
+function fmtVal(key, val, unit) {
   if (val == null) return "N/A";
   if (Array.isArray(val)) return val.length + " event(s)";
+  if (PERCENT_KEYS.has(key) && typeof val === "number") return (val * 100).toFixed(1) + "%";
   if (typeof val === "number") return (Math.abs(val) < 10 ? val.toFixed(3) : val.toFixed(2)) + (unit ? " " + unit : "");
   return String(val);
 }
@@ -345,10 +370,12 @@ function updateCards(metrics) {
   container.innerHTML = "";
   for (const [key, val] of Object.entries(metrics)) {
     const t = THRESHOLDS[key];
+    const unit = t ? t.unit : (UNITS[key] || "");
+    const label = LABELS[key] || key.replace(/_/g, " ");
     const div = document.createElement("div");
     div.className = "metric-card " + verdict(key, val);
-    div.innerHTML = `<div class="label">${key.replace(/_/g, " ")}</div>
-      <div class="value">${fmtVal(val, t ? t.unit : "")}</div>`;
+    div.innerHTML = `<div class="label">${label}</div>
+      <div class="value">${fmtVal(key, val, unit)}</div>`;
     container.appendChild(div);
   }
 }

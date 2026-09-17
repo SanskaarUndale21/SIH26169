@@ -84,13 +84,17 @@ class View3DPanel(QWidget):
 
         self.gl_view = gl.GLViewWidget()
         self.gl_view.setCameraPosition(distance=900, elevation=25, azimuth=-60)
+        # A single backdrop grid, standing in for "the plane the target
+        # moves on". No world-origin axis triad: three unlabelled
+        # coloured lines sitting right at the camera cone's own apex
+        # read as clutter rather than useful orientation, with nothing
+        # on screen saying which axis is which -- removed rather than
+        # explained (matches the same simplification in the web replay's
+        # pat_scene.js, so both 3D views read the same way).
         grid = gl.GLGridItem()
         grid.setSize(x=800, y=800)
         grid.setSpacing(x=50, y=50)
         self.gl_view.addItem(grid)
-        axis = gl.GLAxisItem()
-        axis.setSize(x=150, y=150, z=150)
-        self.gl_view.addItem(axis)
         vlayout.addWidget(self.gl_view)
 
         self._view_container.setLayout(vlayout)
@@ -98,7 +102,7 @@ class View3DPanel(QWidget):
         self._stack.addWidget(self._view_container)
 
         # Camera pointing cone (real gimbal direction)
-        cone_mesh = gl.MeshData.cylinder(rows=4, cols=16, radius=[0.001, 40.0], length=DISPLAY_RANGE * 0.9)
+        cone_mesh = gl.MeshData.cylinder(rows=4, cols=32, radius=[0.001, 40.0], length=DISPLAY_RANGE * 0.9)
         self.cone_item = gl.GLMeshItem(meshdata=cone_mesh, smooth=False, shader="shaded",
                                         color=(0.3, 0.5, 0.9, 0.35), drawEdges=True)
         self.gl_view.addItem(self.cone_item)

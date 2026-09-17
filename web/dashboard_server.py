@@ -381,11 +381,13 @@ _VIEW3D_HTML = r"""<!doctype html>
     display range -- this simulator is 2D and does not model true 3D distance.</div>
 </div>
 <div id="legend">
+  <div><span class="dot" style="background:#3b82f6"></span>Cone = camera boresight (real pan/tilt)</div>
   <div><span class="dot" style="background:#4ade80"></span>Ground truth target</div>
   <div><span class="dot" style="background:#facc15"></span>Tracker estimate</div>
-  <div><span class="dot" style="background:#ef4444"></span>Lock: searching</div>
-  <div><span class="dot" style="background:#eab308"></span>Lock: acquiring/reacquiring</div>
-  <div><span class="dot" style="background:#22c55e"></span>Lock: locked</div>
+  <div style="margin-top:6px;color:#5b6070;">Cone colour = lock state:</div>
+  <div><span class="dot" style="background:#ef4444"></span>Searching</div>
+  <div><span class="dot" style="background:#eab308"></span>Acquiring / reacquiring</div>
+  <div><span class="dot" style="background:#22c55e"></span>Locked</div>
 </div>
 <div id="status">Loading real run data...</div>
 <div id="controls" style="display:none">
