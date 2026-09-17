@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import (QHBoxLayout, QMainWindow, QMessageBox, QPushButton,
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
                                 QSplitter, QStatusBar, QTabWidget, QVBoxLayout, QWidget)
 
 from control.actuator_interface import NullActuator, SimulatorActuator
@@ -45,30 +45,74 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self.view3d_panel, "3D View")
         self.right_tabs.currentChanged.connect(self._on_right_tab_changed)
 
+        # --- Header: product identity + the lock-state badge that also
+        # appears colour-coded in the video overlay, kept in sync here so
+        # the current run state is visible even with the window narrow. ---
+        header = QWidget()
+        header.setObjectName("headerBar")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 10, 16, 10)
+        title_label = QLabel("FSOC Coarse-Alignment Tracker")
+        title_label.setStyleSheet("font-size: 15px; font-weight: 700;")
+        subtitle_label = QLabel("AI-based virtual PAT system for FSOC coarse alignment")
+        subtitle_label.setStyleSheet("font-size: 11px; color: #8b90a0;")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(0)
+        title_col.addWidget(title_label)
+        title_col.addWidget(subtitle_label)
+        self.status_badge = QLabel("IDLE")
+        self.status_badge.setObjectName("statusBadge")
+        self.status_badge.setAlignment(Qt.AlignCenter)
+        self.status_badge.setFixedWidth(110)
+        self._set_status_badge("idle")
+        header_layout.addLayout(title_col)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self.status_badge)
+
         controls = QWidget()
         controls_layout = QHBoxLayout(controls)
-        self.start_btn = QPushButton("Start")
-        self.stop_btn = QPushButton("Stop")
-        self.reset_btn = QPushButton("Reset")
+        controls_layout.setContentsMargins(0, 8, 0, 0)
+        controls_layout.setSpacing(10)
+        self.start_btn = QPushButton("▶  Start")
+        self.start_btn.setObjectName("startBtn")
+        self.stop_btn = QPushButton("■  Stop")
+        self.stop_btn.setObjectName("stopBtn")
+        self.reset_btn = QPushButton("↻  Reset")
         self.stop_btn.setEnabled(False)
         controls_layout.addWidget(self.start_btn)
         controls_layout.addWidget(self.stop_btn)
         controls_layout.addWidget(self.reset_btn)
+        controls_layout.addStretch(1)
         self.start_btn.clicked.connect(self.start_run)
         self.stop_btn.clicked.connect(self.stop_run)
         self.reset_btn.clicked.connect(self.reset_run)
 
         left = QWidget()
+        left.setObjectName("centerPane")
         left_layout = QVBoxLayout(left)
-        left_layout.addWidget(self.video_panel)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(10)
+        video_title = QLabel("LIVE FEED")
+        video_title.setStyleSheet("font-size: 11px; font-weight: 700; color: #8b90a0; letter-spacing: 1px;")
+        left_layout.addWidget(video_title)
+        left_layout.addWidget(self.video_panel, stretch=1)
         left_layout.addWidget(controls)
 
         splitter = QSplitter()
+        splitter.setContentsMargins(0, 0, 0, 0)
         splitter.addWidget(self.config_panel)
         splitter.addWidget(left)
         splitter.addWidget(self.right_tabs)
-        splitter.setSizes([260, 640, 420])
-        self.setCentralWidget(splitter)
+        splitter.setSizes([300, 660, 460])
+        splitter.setHandleWidth(2)
+
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(header)
+        central_layout.addWidget(splitter, stretch=1)
+        self.setCentralWidget(central)
 
         self.setStatusBar(QStatusBar())
 
@@ -76,6 +120,21 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.step)
 
         self._reset_runtime_state()
+
+    def _set_status_badge(self, state: str):
+        colors = {
+            "idle": ("#242833", "#8b90a0"),
+            "running": ("#0f2a1a", "#4ade80"),
+            "locked": ("#0f2a1a", "#4ade80"),
+            "searching": ("#2a1414", "#f87171"),
+            "acquiring": ("#2a2410", "#facc15"),
+        }
+        bg, fg = colors.get(state, colors["idle"])
+        self.status_badge.setText(state.upper())
+        self.status_badge.setStyleSheet(
+            f"background: {bg}; color: {fg}; border: 1px solid {fg}; "
+            f"border-radius: 12px; padding: 5px 12px; font-size: 11px; font-weight: 700;"
+        )
 
     def _reset_runtime_state(self):
         self.frame_source = None
@@ -148,6 +207,7 @@ class MainWindow(QMainWindow):
         self.timer.start(int(1000 / max(cfg["camera"]["update_rate_hz"], 1)))
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        self._set_status_badge("running")
         self.statusBar().showMessage("Running...")
 
     def step(self):
@@ -228,12 +288,14 @@ class MainWindow(QMainWindow):
             self.dashboard_panel.update_metrics_readout(self.metrics.finalize())
         elif current_tab == 1:
             self.view3d_panel.update_frame(record)
+        self._set_status_badge(telemetry.lock_state)
         self.statusBar().showMessage(f"frame {frame.frame_id}  lock={telemetry.lock_state}")
 
     def stop_run(self):
         self.timer.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._set_status_badge("idle")
         if self._current_run_name is None:
             self.statusBar().showMessage("Nothing to stop -- no run was started.")
             return

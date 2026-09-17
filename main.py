@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gui.main_window import MainWindow
+from gui.theme import STYLESHEET
 
 
 def load_config(path: str = None) -> dict:
@@ -21,8 +22,9 @@ def load_config(path: str = None) -> dict:
 def main():
     config = load_config()
     app = QApplication(sys.argv)
+    app.setStyleSheet(STYLESHEET)
     window = MainWindow(config)
-    window.resize(1400, 800)
+    window.resize(1500, 860)
     window.show()
     sys.exit(app.exec())
 

@@ -17,8 +17,8 @@ import copy
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                 QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-                                QPushButton, QScrollArea, QSlider, QSpinBox,
-                                QTabWidget, QVBoxLayout, QWidget)
+                                QListWidget, QListWidgetItem, QPushButton, QScrollArea,
+                                QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from config.param_schema import GROUP_ORDER, PARAM_SCHEMA, flatten_config_to_ui_values, get_path
 
@@ -110,9 +110,18 @@ class ConfigPanel(QWidget):
         src_layout.addLayout(file_row)
         outer.addWidget(src_group)
 
-        # --- everything else: schema-driven tabs, one per group ---
-        tabs = QTabWidget()
-        outer.addWidget(tabs, stretch=1)
+        # --- everything else: a sidebar list of parameter groups next to
+        # a stacked panel showing the selected group's form. 18 groups in
+        # a horizontal QTabWidget strip overflows and hides most of them
+        # behind a scroll arrow (illegible at any reasonable panel width);
+        # a vertical list scales to any number of groups and reads as an
+        # actual settings navigation instead of a jammed tab bar. ---
+        body = QHBoxLayout()
+        body.setSpacing(0)
+        self.group_list = QListWidget()
+        self.group_list.setObjectName("groupList")
+        self.group_list.setFixedWidth(150)
+        self.stack = QStackedWidget()
 
         by_group: dict = {}
         for p in PARAM_SCHEMA:
@@ -125,16 +134,29 @@ class ConfigPanel(QWidget):
                 continue
             tab = QWidget()
             form = QFormLayout(tab)
+            form.setSpacing(10)
+            form.setContentsMargins(12, 12, 12, 12)
             for p in params:
                 key = "/".join(str(k) for k in p.path)
                 current = ui_values.get(key, p.default)
                 widget = self._build_widget(p, current)
                 self._widgets[key] = widget
-                form.addRow(p.label, widget)
+                label = QLabel(p.label)
+                if p.help:
+                    label.setToolTip(p.help)
+                form.addRow(label, widget)
             scroll = QScrollArea()
             scroll.setWidget(tab)
             scroll.setWidgetResizable(True)
-            tabs.addTab(scroll, group)
+            self.stack.addWidget(scroll)
+            QListWidgetItem(group, self.group_list)
+
+        self.group_list.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.group_list.setCurrentRow(0)
+
+        body.addWidget(self.group_list)
+        body.addWidget(self.stack, stretch=1)
+        outer.addLayout(body, stretch=1)
 
         self._on_source_changed(0)
 

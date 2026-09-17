@@ -14,84 +14,123 @@ CONTROL_HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <title>FSOC Tracker -- Live Control</title>
 <style>
-  :root { color-scheme: light dark; }
-  html, body { margin: 0; background: #0f1117; color: #e5e7eb;
-               font-family: -apple-system, Segoe UI, Roboto, sans-serif; height: 100%; overflow: hidden; }
-  header { padding: 10px 20px; border-bottom: 1px solid #23262f; display: flex; align-items: center; gap: 16px; }
-  header h1 { margin: 0; font-size: 16px; font-weight: 600; flex: 1; }
-  .nav-link { font-size: 13px; color: #60a5fa; text-decoration: none; }
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d12; --surface: #12141a; --surface-raised: #171a21;
+    --border: #242833; --border-light: #2e3340;
+    --text: #e6e8ec; --text-muted: #8b90a0; --text-faint: #5b6070;
+    --accent: #3b82f6; --accent-hover: #2563eb; --accent-text: #93c5fd;
+    --ok: #22c55e; --ok-text: #4ade80; --bad: #ef4444; --bad-text: #f87171; --warn: #eab308;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+               font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+               height: 100%; overflow: hidden; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface);
+           display: flex; align-items: center; gap: 16px; }
+  header .title-block { display: flex; flex-direction: column; gap: 1px; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 700; }
+  header .subtitle { font-size: 11px; color: var(--text-muted); }
+  header .spacer { flex: 1; }
+  .nav-link { font-size: 13px; color: var(--accent-text); text-decoration: none; font-weight: 500; }
   .nav-link:hover { text-decoration: underline; }
-  #status-badge { font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: 600; }
-  .status-idle { background: #23262f; color: #9ca3af; }
-  .status-live { background: #0f2a1a; color: #4ade80; border: 1px solid #22c55e; }
-  .status-error { background: #2a1414; color: #f87171; border: 1px solid #ef4444; }
-  button.action { background: #2563eb; color: white; border: none; border-radius: 6px;
-                   padding: 7px 16px; font-size: 13px; cursor: pointer; font-weight: 500; }
-  button.action:disabled { background: #374151; color: #6b7280; cursor: default; }
-  button.action.stop { background: #dc2626; }
-  main { display: grid; grid-template-columns: 340px 1fr 300px; height: calc(100vh - 49px); }
-  #config-col { border-right: 1px solid #23262f; overflow-y: auto; display: flex; flex-direction: column; }
-  #source-box { padding: 12px 16px; border-bottom: 1px solid #23262f; }
-  #source-box select, #source-box input[type=file] { width: 100%; margin-top: 6px; background: #171922;
-      color: #e5e7eb; border: 1px solid #334155; border-radius: 4px; padding: 4px; font-size: 12px; }
-  #tab-buttons { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 10px; border-bottom: 1px solid #23262f; }
-  #tab-buttons button { background: #171922; color: #9ca3af; border: 1px solid #23262f; border-radius: 4px;
-                          padding: 3px 8px; font-size: 10px; cursor: pointer; }
-  #tab-buttons button.active { background: #1e2530; color: #93c5fd; border-color: #2563eb; }
-  #tab-panels { flex: 1; overflow-y: auto; padding: 8px 16px; }
-  .param-row { margin: 10px 0; }
-  .param-row label { display: block; font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
-  .param-row .row-inputs { display: flex; align-items: center; gap: 8px; }
-  .param-row input[type=range] { flex: 1; }
-  .param-row input[type=number] { width: 70px; background: #171922; color: #e5e7eb; border: 1px solid #334155;
-      border-radius: 4px; padding: 3px 5px; font-size: 12px; }
-  .param-row select { width: 100%; background: #171922; color: #e5e7eb; border: 1px solid #334155;
-      border-radius: 4px; padding: 4px; font-size: 12px; }
-  .param-row input[type=checkbox] { transform: scale(1.2); }
-  .param-unit { font-size: 11px; color: #6b7280; }
-  #center-col { position: relative; }
+  #status-badge { font-size: 11px; padding: 4px 12px; border-radius: 12px; font-weight: 700; letter-spacing: 0.03em; }
+  .status-idle { background: var(--border); color: var(--text-muted); }
+  .status-live { background: #0f2a1a; color: var(--ok-text); border: 1px solid var(--ok); }
+  .status-error { background: #2a1414; color: var(--bad-text); border: 1px solid var(--bad); }
+  button.action { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border-light);
+                   border-radius: 6px; padding: 8px 18px; font-size: 13px; cursor: pointer; font-weight: 600;
+                   transition: background 0.12s, border-color 0.12s; }
+  button.action:hover:not(:disabled) { border-color: var(--accent); }
+  button.action:disabled { background: var(--surface); color: var(--text-faint); border-color: var(--border); cursor: default; }
+  button.action:not(.stop):not(:disabled) { background: var(--accent); border-color: var(--accent); color: white; }
+  button.action:not(.stop):not(:disabled):hover { background: var(--accent-hover); }
+  button.action.stop:not(:disabled) { border-color: var(--bad); color: var(--bad-text); }
+  button.action.stop:not(:disabled):hover { background: #241414; }
+
+  main { display: grid; grid-template-columns: 380px 1fr 320px; height: calc(100vh - 57px); }
+  #config-col { border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column;
+                background: var(--surface); }
+  #source-box { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  #source-box > label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase;
+                          letter-spacing: 0.04em; }
+  #source-box select, #source-box input[type=file] { width: 100%; margin-top: 6px; background: var(--surface-raised);
+      color: var(--text); border: 1px solid var(--border-light); border-radius: 5px; padding: 6px 8px; font-size: 12px; }
+  #config-body { flex: 1; display: flex; overflow: hidden; }
+  #tab-buttons { width: 130px; overflow-y: auto; border-right: 1px solid var(--border);
+                 padding: 6px 0; flex-shrink: 0; }
+  #tab-buttons button { display: block; width: 100%; text-align: left; background: transparent;
+      color: var(--text-muted); border: none; border-left: 2px solid transparent; padding: 9px 12px;
+      font-size: 12px; cursor: pointer; }
+  #tab-buttons button.active { background: var(--surface-raised); color: var(--text); border-left-color: var(--accent); }
+  #tab-buttons button:hover:not(.active) { background: var(--surface-raised); color: var(--text); }
+  #tab-panels { flex: 1; overflow-y: auto; padding: 14px 18px; }
+  .param-row { margin: 0 0 14px; }
+  .param-row label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 5px; font-weight: 500; }
+  .param-row .row-inputs { display: flex; align-items: center; gap: 10px; }
+  .param-row input[type=range] { flex: 1; accent-color: var(--accent); }
+  .param-row input[type=number] { width: 72px; background: var(--surface-raised); color: var(--text);
+      border: 1px solid var(--border-light); border-radius: 5px; padding: 4px 6px; font-size: 12px; }
+  .param-row select { width: 100%; background: var(--surface-raised); color: var(--text);
+      border: 1px solid var(--border-light); border-radius: 5px; padding: 5px 8px; font-size: 12px; }
+  .param-row input[type=checkbox] { transform: scale(1.25); accent-color: var(--accent); }
+
+  #center-col { position: relative; background: var(--bg); }
   #canvas-holder { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-  #legend { position: absolute; top: 10px; right: 14px; font-size: 11px; background: rgba(15,17,23,0.75);
-            border: 1px solid #23262f; border-radius: 8px; padding: 8px 12px; }
-  #legend div { margin: 2px 0; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
-  #frame-readout { position: absolute; bottom: 10px; left: 14px; font-size: 11px; color: #9ca3af;
-      background: rgba(15,17,23,0.75); border: 1px solid #23262f; border-radius: 8px; padding: 6px 10px; }
-  #right-col { overflow-y: auto; padding: 12px; }
-  .metric-card { background: #171922; border: 1px solid #23262f; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
-  .metric-card .label { font-size: 10px; color: #9ca3af; text-transform: uppercase; }
-  .metric-card .value { font-size: 16px; font-weight: 600; margin-top: 2px; }
-  .metric-card.ok .value { color: #4ade80; }
-  .metric-card.bad .value { color: #f87171; }
-  .metric-card.na .value { color: #9ca3af; }
-  canvas.chart { width: 100%; height: 80px; background: #0a0b0f; border: 1px solid #23262f; border-radius: 6px;
-                 margin-bottom: 10px; }
-  .chart-title { font-size: 10px; color: #9ca3af; margin: 10px 0 4px; text-transform: uppercase; }
-  #result-box { padding: 10px; margin-top: 8px; background: #0f2a1a; border: 1px solid #22c55e; border-radius: 6px;
-                font-size: 12px; display: none; }
-  #result-box a { color: #93c5fd; }
+  #legend { position: absolute; top: 12px; right: 16px; font-size: 11px; background: rgba(18,20,26,0.85);
+            border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; backdrop-filter: blur(4px); }
+  #legend div { margin: 3px 0; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  #frame-readout { position: absolute; bottom: 12px; left: 16px; font-size: 11px; color: var(--text-muted);
+      background: rgba(18,20,26,0.85); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+      backdrop-filter: blur(4px); font-family: "SF Mono", Consolas, monospace; }
+
+  #right-col { overflow-y: auto; padding: 16px; background: var(--surface); }
+  .chart-title { font-size: 10px; color: var(--text-muted); margin: 14px 0 6px; text-transform: uppercase;
+                 letter-spacing: 0.05em; font-weight: 600; }
+  .chart-title:first-child { margin-top: 0; }
+  canvas.chart { width: 100%; height: 84px; background: var(--bg); border: 1px solid var(--border);
+                 border-radius: 8px; display: block; }
+  #cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px;
+                 padding: 10px 12px; }
+  .metric-card .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric-card .value { font-size: 17px; font-weight: 700; margin-top: 3px; }
+  .metric-card.ok .value { color: var(--ok-text); }
+  .metric-card.bad .value { color: var(--bad-text); }
+  .metric-card.na .value { color: var(--text-faint); }
+  #result-box { padding: 12px 14px; margin-top: 10px; background: #0f2a1a; border: 1px solid var(--ok);
+                border-radius: 8px; font-size: 12px; line-height: 1.5; display: none; }
+  #result-box a { color: var(--accent-text); font-weight: 600; }
 </style>
 </head>
 <body>
 <header>
-  <h1>FSOC Live Control <span id="status-badge" class="status-idle">idle</span></h1>
-  <button id="startBtn" class="action">Start</button>
-  <button id="stopBtn" class="action stop" disabled>Stop</button>
+  <div class="title-block">
+    <h1>FSOC Live Control</h1>
+    <span class="subtitle">Real live simulation engine -- same TrackingRunner as the desktop app</span>
+  </div>
+  <span id="status-badge" class="status-idle">idle</span>
+  <span class="spacer"></span>
+  <button id="startBtn" class="action">&#9654;&nbsp; Start</button>
+  <button id="stopBtn" class="action stop" disabled>&#9632;&nbsp; Stop</button>
   <a href="/" class="nav-link">Results &amp; Replay &rarr;</a>
 </header>
 <main>
   <div id="config-col">
     <div id="source-box">
-      <label style="font-size:11px;color:#9ca3af;">Input source</label>
+      <label>Input source</label>
       <select id="sourceSelect">
         <option value="simulator">Simulator</option>
         <option value="video">Load video file (.mp4)</option>
       </select>
       <input type="file" id="videoFile" accept=".mp4" style="display:none;">
-      <div id="videoStatus" style="font-size:11px;color:#6b7280;margin-top:4px;"></div>
+      <div id="videoStatus" style="font-size:11px;color:var(--text-faint);margin-top:4px;"></div>
     </div>
-    <div id="tab-buttons"></div>
-    <div id="tab-panels"></div>
+    <div id="config-body">
+      <div id="tab-buttons"></div>
+      <div id="tab-panels"></div>
+    </div>
   </div>
   <div id="center-col">
     <div id="canvas-holder"></div>
