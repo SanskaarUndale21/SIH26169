@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recorded Runs</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .tally { display: flex; gap: 22px; color: var(--dim); font-size: 14px; }
+  .tally b { color: var(--text); font-stretch: 110%; font-size: 18px; margin-right: 4px; font-variant-numeric: tabular-nums; }
+  td.pass { color: var(--lock); }
+  td.fail { color: var(--search); }
+  td .sub { display: block; font-size: 12.5px; color: var(--faint); }
+  @media (max-width: 760px) { .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Runs</h1>
+      <p class="lede">Every run recorded by this console or the desktop app. Green values meet the problem statement's targets, red ones miss.</p>
+    </div>
+    <div class="actions"><a class="btn primary" href="/setup">New run</a></div>
+  </div>
+
+  <div class="filters">
+    <div class="seg" role="group" aria-label="Filter runs">
+      <button type="button" data-f="all" aria-pressed="true">All</button>
+      <button type="button" data-f="pass" aria-pressed="false">Meets spec</button>
+      <button type="button" data-f="fail" aria-pressed="false">Misses spec</button>
+      <button type="button" data-f="video" aria-pressed="false">Video runs</button>
+    </div>
+    <div class="tally" id="tally"></div>
+  </div>
+
+  <div class="panel" style="padding:8px 8px 0">
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr>
+          <th>Recorded</th><th>Scenario</th>
+          <th>Acquisition</th><th>Avg error</th><th class="hide-sm">Target loss</th><th class="hide-sm">Re-acq. worst</th><th class="hide-sm">FPS</th><th>Result</th>
+        </tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="muted">Loading runs</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+</div>
+<script type="module">
+import { SPEC, judge, fmt, api, runDate, describeRun, overallVerdict } from "/static/app.js";
+let runs = [], filter = "all";
+const specBy = Object.fromEntries(SPEC.map(s => [s.key, s]));
+
+function cell(key, m, digits, cls = "") {
+  const s = specBy[key], v = s.get(m);
+  const shown = v == null ? (s.noneText && m.acquisition_time_sec != null ? s.noneText : "–") : `${fmt(v, digits)} ${s.unit}`;
+  return `<td class="${judge(s, v)} ${cls}">${shown}</td>`;
+}
+
+function render() {
+  const rows = runs.filter(r => {
+    const v = overallVerdict(r.metrics);
+    if (filter === "pass") return v === "pass";
+    if (filter === "fail") return v !== "pass";
+    if (filter === "video") return r.info && r.info.mode === "video";
+    return true;
+  });
+  const body = document.getElementById("rows");
+  if (!runs.length) {
+    body.innerHTML = `<tr><td colspan="8"><div class="empty"><h3>No runs recorded yet</h3>
+      <p>Each run you start is scored and saved here automatically.</p><a class="btn primary" href="/setup">Set up a run</a></div></td></tr>`;
+    return;
+  }
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="8" class="muted" style="padding:28px 14px">No runs match this filter.</td></tr>`; return; }
+  body.innerHTML = rows.map(r => {
+    const m = r.metrics, v = overallVerdict(m);
+    return `<tr class="clickable" data-name="${r.name}" tabindex="0">
+      <td>${runDate(r.name)}<span class="sub">${fmt(m.simulation_duration_sec, 1)} s long</span></td>
+      <td>${describeRun(r.info)}</td>
+      ${cell("acquisition", m)}${cell("error", m)}${cell("loss", m, 1, "hide-sm")}${cell("reacq", m, 2, "hide-sm")}${cell("fps", m, 0, "hide-sm")}
+      <td><span class="chip ${v}">${v === "pass" ? "Pass" : "Fail"}</span></td></tr>`;
+  }).join("");
+  body.querySelectorAll("tr[data-name]").forEach(tr => {
+    const open = () => location.href = `/runs/${encodeURIComponent(tr.dataset.name)}`;
+    tr.addEventListener("click", open);
+    tr.addEventListener("keydown", e => { if (e.key === "Enter") open(); });
+  });
+}
+
+document.querySelectorAll("[data-f]").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f;
+  document.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  render();
+}));
+
+(async () => {
+  try { runs = await api("/api/runs"); } catch { runs = []; }
+  const pass = runs.filter(r => overallVerdict(r.metrics) === "pass").length;
+  document.getElementById("tally").innerHTML = runs.length
+    ? `<span><b>${runs.length}</b>runs</span><span><b style="color:var(--lock)">${pass}</b>meet spec</span>` : "";
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Tracking</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .live-head { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+  .live-head .who { display: grid; gap: 4px; }
+  .live-head .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--dim); font-size: 14px; }
+  .live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  .view-panel { padding: 0; overflow: hidden; }
+  .view-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--rule-soft); flex-wrap: wrap; }
+  .stage { position: relative; aspect-ratio: 4 / 3; background: #050a18; }
+  .stage > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .stage [hidden] { display: none; }
+  .hud { position: absolute; inset: auto 12px 12px 12px; width: auto; height: auto; display: flex; justify-content: space-between; gap: 12px; pointer-events: none; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .hud span { background: rgba(10,18,38,.78); padding: 5px 9px; border-radius: 6px; }
+  .view-legend { padding: 12px 14px; border-top: 1px solid var(--rule-soft); }
+
+  .lock-block { padding: 20px 22px; border-radius: var(--r-lg); border: 1px solid var(--rule-soft); background: var(--deck); }
+  .lock-block .state { font-stretch: 125%; font-weight: 800; font-size: 34px; line-height: 1; letter-spacing: -0.01em; margin: 6px 0 10px; }
+  .lock-block[data-state=searching] .state { color: var(--search); }
+  .lock-block[data-state=acquiring] .state, .lock-block[data-state=reacquiring] .state { color: var(--acq); }
+  .lock-block[data-state=locked] .state { color: var(--lock); }
+  .lock-block .row { display: flex; justify-content: space-between; font-size: 13.5px; color: var(--dim); }
+  .lock-block .row b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .side { display: grid; gap: 16px; }
+  .spec-list { display: grid; }
+  .spec-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 12px 0; border-bottom: 1px solid var(--rule-soft); }
+  .spec-row:last-child { border-bottom: 0; }
+  .spec-row .k { font-size: 13.5px; font-weight: 560; }
+  .spec-row .v { font-stretch: 110%; font-size: 20px; font-weight: 680; text-align: right; font-variant-numeric: tabular-nums; grid-row: span 2; align-self: center; }
+  .spec-row .t { font-size: 12px; color: var(--faint); }
+  .spec-row.pass .v { color: var(--lock); }
+  .spec-row.fail .v { color: var(--search); }
+  .charts { margin-top: 20px; display: grid; grid-template-columns: 1fr; gap: 20px; }
+  .chart { width: 100%; height: 150px; }
+  .ribbon { width: 100%; height: 14px; border-radius: 4px; margin-top: 8px; background: var(--ink); }
+  .done-banner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 22px; border-radius: var(--r-lg); border: 1px solid rgba(55,216,168,.35); background: var(--lock-wash); margin-bottom: 20px; }
+  .done-banner.fail { border-color: rgba(255,110,87,.4); background: var(--search-wash); }
+  @media (max-width: 1100px) { .live-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div id="idle" hidden>
+    <h1 class="page-title">Live</h1>
+    <div class="panel empty" style="margin-top:24px">
+      <h3>No run in progress</h3>
+      <p>Set up a scenario and start it. The camera feed and lock state will stream here as it runs.</p>
+      <a class="btn primary" href="/setup">Set up a run</a>
+    </div>
+  </div>
+
+  <div id="live" hidden>
+    <div class="live-head">
+      <div class="who">
+        <h1 class="page-title" id="title">Live run</h1>
+        <div class="meta"><span id="desc"></span><span class="faint num" id="clock"></span></div>
+      </div>
+      <div class="actions" style="display:flex;gap:10px">
+        <button class="btn danger" id="stopBtn" type="button">Stop and save</button>
+      </div>
+    </div>
+
+    <div class="done-banner" id="doneBanner" hidden>
+      <div><h3 id="doneTitle">Run saved</h3><div class="small muted" id="doneSub"></div></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn primary" id="reportLink" href="/runs">Open report</a>
+        <a class="btn" href="/setup">New run</a>
+      </div>
+    </div>
+
+    <div class="live-grid">
+      <div>
+        <div class="panel view-panel">
+          <div class="view-bar">
+            <div class="seg" role="group" aria-label="View">
+              <button type="button" data-view="camera" aria-pressed="true">Camera</button>
+              <button type="button" data-view="world" aria-pressed="false">Whole screen</button>
+              <button type="button" data-view="gimbal" aria-pressed="false">3D gimbal</button>
+            </div>
+            <span class="small faint" id="viewNote">What the tracker sees, with its detections drawn on top</span>
+          </div>
+          <div class="stage">
+            <canvas id="cam"></canvas>
+            <canvas id="world" hidden></canvas>
+            <div id="gimbal" hidden></div>
+            <div class="hud" id="hud"><span id="hudL">Waiting for frames</span><span id="hudR"></span></div>
+          </div>
+          <div class="view-legend legend" id="legend"></div>
+        </div>
+
+        <div class="charts">
+          <div class="panel">
+            <div class="panel-head"><h3 id="chartTitle">Tracking error</h3><span class="small faint">last 20 s</span></div>
+            <canvas class="chart" id="errChart"></canvas>
+            <canvas class="ribbon" id="ribbon"></canvas>
+            <div class="legend" style="margin-top:10px">
+              <span><i style="background:#37d8a8"></i>Locked</span><span><i style="background:#8fb4ff"></i>Acquiring</span><span><i style="background:#ff6e57"></i>Searching</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="side">
+        <div class="lock-block" id="lockBlock" data-state="searching">
+          <span class="small muted">Lock state</span>
+          <div class="state" id="lockState">Starting</div>
+          <div class="row"><span>Error now</span><b id="errNow">–</b></div>
+          <div class="row" style="margin-top:6px"><span>Pan, tilt</span><b id="panTilt">–</b></div>
+          <div class="row" style="margin-top:6px"><span>Confidence</span><b id="conf">–</b></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Against the spec</h3><span class="small faint">live</span></div>
+          <div class="spec-list" id="specList"></div>
+        </div>
+        <div class="panel">
+          <h3 style="margin-bottom:8px">Link context</h3>
+          <div class="spec-list" id="linkList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+
+<script type="importmap">{ "imports": { "three": "/static/three.module.min.js" } }</script>
+<script type="module">
+import { SPEC, judge, fmt, api, toast, drawLine, drawLockRibbon, LOCK_NAMES, describeRun, runDate, overallVerdict } from "/static/app.js";
+
+const $ = id => document.getElementById(id);
+let ws = null, status = null, lastRecord = null, lastImage = null, lastWorld = null, imgSize = [640, 480];
+let series = { t: [], err: [], state: [] };
+let worldTrail = [], camTrail = [];
+let view = "camera", pat = null, finished = false, startedClock = null;
+const img = new Image();
+
+// ---------- views ----------
+const LEGENDS = {
+  camera: `<span><i style="background:transparent;border:1.5px solid #37d8a8"></i>Tracker estimate</span>
+    <span><i style="background:#ffb53d"></i>Detected spot</span><span><i style="background:transparent;border:1.5px dashed #e8ecf7"></i>True beacon position</span>
+    <span><i style="background:transparent;border:1.5px solid #6c7aa3"></i>Boresight</span>`,
+  world: `<span><i style="background:transparent;border:1.5px solid #37d8a8"></i>Camera view (colour = lock state)</span>
+    <span><i style="background:#ffb53d"></i>Beacon</span><span><i style="background:#8fb4ff"></i>Boresight path</span>`,
+  gimbal: `<span><i style="background:#37d8a8"></i>Cone = boresight, colour = lock state</span><span><i style="background:#ffb53d"></i>Beacon (truth)</span>
+    <span><i style="background:#e8ecf7"></i>Tracker estimate</span><span class="faint">Drag to orbit, scroll to zoom</span>`,
+};
+const NOTES = {
+  camera: "What the tracker sees, with its detections drawn on top",
+  world: "The full scene from above, with where the camera is pointing",
+  gimbal: "Pan and tilt of the camera as a pointing cone",
+};
+document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+async function setView(v) {
+  view = v;
+  document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === v));
+  $("cam").hidden = v !== "camera"; $("world").hidden = v !== "world"; $("gimbal").hidden = v !== "gimbal";
+  $("hud").hidden = v === "gimbal";
+  $("legend").innerHTML = LEGENDS[v]; $("viewNote").textContent = NOTES[v];
+  if (v === "gimbal" && !pat) {
+    const { createPATScene } = await import("/static/pat_scene.js");
+    pat = createPATScene($("gimbal"));
+    pat.startRenderLoop();
+    if (lastRecord) pat.applyFrame(lastRecord);
+  }
+  if (pat) pat.resize();
+  draw();
+}
+
+function fitCanvas(c) {
+  const w = c.clientWidth, h = c.clientHeight, d = devicePixelRatio || 1;
+  if (c.width !== Math.round(w * d) || c.height !== Math.round(h * d)) { c.width = Math.round(w * d); c.height = Math.round(h * d); }
+  const ctx = c.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0);
+  return { ctx, w, h };
+}
+
+function drawCamera() {
+  const { ctx, w, h } = fitCanvas($("cam"));
+  ctx.fillStyle = "#050a18"; ctx.fillRect(0, 0, w, h);
+  if (!lastImage) return;
+  const [iw, ih] = imgSize, k = Math.min(w / iw, h / ih), ox = (w - iw * k) / 2, oy = (h - ih * k) / 2;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, ox, oy, iw * k, ih * k);
+  const P = ([x, y]) => [ox + x * k, oy + y * k];
+  // boresight
+  const [cx, cy] = P([iw / 2, ih / 2]);
+  ctx.strokeStyle = "rgba(163,174,205,0.55)"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 28, cy); ctx.lineTo(cx - 8, cy); ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + 28, cy);
+  ctx.moveTo(cx, cy - 28); ctx.lineTo(cx, cy - 8); ctx.moveTo(cx, cy + 8); ctx.lineTo(cx, cy + 28);
+  ctx.stroke();
+  const r = lastRecord; if (!r) return;
+  (r.ground_truth_px || []).forEach(g => {
+    const [x, y] = P(g); ctx.setLineDash([4, 3]); ctx.strokeStyle = "rgba(232,236,247,0.85)"; ctx.strokeRect(x - 11, y - 11, 22, 22); ctx.setLineDash([]);
+  });
+  if (r.centroid_px) { const [x, y] = P(r.centroid_px); ctx.fillStyle = "#ffb53d"; ctx.beginPath(); ctx.arc(x, y, 3.2, 0, 7); ctx.fill(); }
+  if (r.predicted_px && r.lock_state !== "searching") {
+    const [x, y] = P(r.predicted_px);
+    const col = r.lock_state === "locked" ? "#37d8a8" : "#8fb4ff";
+    ctx.strokeStyle = col; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(x, y, 16, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - 24, y); ctx.lineTo(x - 16, y); ctx.moveTo(x + 16, y); ctx.lineTo(x + 24, y);
+    ctx.moveTo(x, y - 24); ctx.lineTo(x, y - 16); ctx.moveTo(x, y + 16); ctx.lineTo(x, y + 24); ctx.stroke();
+  }
+}
+
+function drawWorld() {
+  const { ctx, w, h } = fitCanvas($("world"));
+  ctx.fillStyle = "#050a18"; ctx.fillRect(0, 0, w, h);
+  const scr = (status && status.info && status.info.screen) || [2000, 2000];
+  if (!lastWorld) {
+    ctx.fillStyle = "#6c7aa3"; ctx.font = "14px Archivo, system-ui";
+    const msg = status && status.info && status.info.mode === "video" ? "Video runs have no scene to map" : "Waiting for frames";
+    ctx.fillText(msg, w / 2 - ctx.measureText(msg).width / 2, h / 2); return;
+  }
+  const pad = 16, k = Math.min((w - pad * 2) / scr[0], (h - pad * 2) / scr[1]);
+  const ox = (w - scr[0] * k) / 2, oy = (h - scr[1] * k) / 2;
+  const X = x => ox + x * k, Y = y => oy + y * k;
+  ctx.strokeStyle = "rgba(143,164,222,0.09)";
+  for (let g = 0; g <= 10; g++) {
+    ctx.beginPath(); ctx.moveTo(X(scr[0] * g / 10), Y(0)); ctx.lineTo(X(scr[0] * g / 10), Y(scr[1])); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(X(0), Y(scr[1] * g / 10)); ctx.lineTo(X(scr[0]), Y(scr[1] * g / 10)); ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(143,164,222,0.4)"; ctx.strokeRect(X(0), Y(0), scr[0] * k, scr[1] * k);
+  ctx.strokeStyle = "rgba(143,180,255,0.6)"; ctx.lineWidth = 1.2; ctx.beginPath();
+  camTrail.forEach(([x, y], i) => i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.stroke();
+  ctx.strokeStyle = "rgba(255,181,61,0.35)"; ctx.beginPath();
+  worldTrail.forEach(([x, y], i) => i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.stroke();
+  lastWorld.targets.forEach(([x, y]) => { ctx.fillStyle = "#ffb53d"; ctx.fillRect(X(x) - 4, Y(y) - 4, 8, 8); });
+  const [cxw, cyw] = lastWorld.cam, [fw, fh] = lastWorld.fov;
+  const col = { locked: "#37d8a8", acquiring: "#8fb4ff", reacquiring: "#8fb4ff", searching: "#ff6e57" }[lastRecord?.lock_state] || "#6c7aa3";
+  ctx.strokeStyle = col; ctx.lineWidth = 2;
+  ctx.strokeRect(X(cxw - fw / 2), Y(cyw - fh / 2), fw * k, fh * k);
+}
+
+function draw() { if (view === "camera") drawCamera(); else if (view === "world") drawWorld(); }
+addEventListener("resize", () => { draw(); drawCharts(); });
+
+// ---------- data ----------
+function errorOf(r) {
+  if (!r.ground_truth_px || !r.ground_truth_px.length || !r.predicted_px || r.lock_state === "searching") return null;
+  const [px, py] = r.predicted_px;
+  return Math.min(...r.ground_truth_px.map(([gx, gy]) => Math.hypot(px - gx, py - gy)));
+}
+function onFrames(frames) {
+  for (const r of frames) {
+    const e = errorOf(r);
+    const isVideo = status?.info?.mode === "video";
+    series.t.push(r.timestamp); series.err.push(isVideo ? r.confidence : e); series.state.push(r.lock_state);
+    if (pat) pat.applyFrame(r);
+    lastRecord = lastRecord && lastRecord.frame_id > r.frame_id ? lastRecord : r;
+  }
+  const cut = series.t.length ? series.t[series.t.length - 1] - 20 : 0;
+  let i = 0; while (i < series.t.length && series.t[i] < cut) i++;
+  if (i) { series.t.splice(0, i); series.err.splice(0, i); series.state.splice(0, i); }
+  const r = frames[frames.length - 1];
+  const lb = $("lockBlock");
+  lb.dataset.state = r.lock_state;
+  $("lockState").textContent = LOCK_NAMES[r.lock_state] || r.lock_state;
+  const e = errorOf(r);
+  $("errNow").textContent = e == null ? "–" : `${fmt(e, 1)} px`;
+  $("panTilt").textContent = r.cam_pan_deg == null ? "Fixed camera" : `${fmt(r.cam_pan_deg, 2)}°, ${fmt(r.cam_tilt_deg, 2)}°`;
+  $("conf").textContent = fmt(r.confidence, 2);
+  $("hudL").textContent = `Frame ${r.frame_id}, t = ${fmt(r.timestamp, 1)} s`;
+  $("hudR").textContent = r.detected ? "Beacon detected" : "No detection";
+}
+let chartPending = false;
+function drawCharts() {
+  const isVideo = status?.info?.mode === "video";
+  $("chartTitle").textContent = isVideo ? "Detection confidence" : "Tracking error (px)";
+  drawLine($("errChart"), series.t, series.err, isVideo ? { color: "#8fb4ff", yMaxFloor: 1 } : { threshold: 10, thresholdLabel: "10 px limit", color: "#ffb53d", yMaxFloor: 12 });
+  drawLockRibbon($("ribbon"), series.t, series.state);
+}
+function scheduleCharts() { if (!chartPending) { chartPending = true; requestAnimationFrame(() => { chartPending = false; drawCharts(); }); } }
+
+function renderSpec(m) {
+  $("specList").innerHTML = SPEC.map(s => {
+    const v = m ? s.get(m) : null, verdict = judge(s, v);
+    const shown = v == null ? (s.noneText && m && m.acquisition_time_sec != null ? s.noneText : "–") : `${fmt(v)} ${s.unit}`;
+    return `<div class="spec-row ${verdict}"><span class="k">${s.label}</span><span class="v">${shown}</span><span class="t">${s.note}</span></div>`;
+  }).join("");
+  const link = [
+    ["Avg pointing error", m?.avg_angular_error_urad, "µrad"],
+    ["Avg pointing loss", m?.avg_pointing_loss_db, "dB"],
+    ["Ready for fine stage", m?.handoff_ready_rate == null ? null : m.handoff_ready_rate * 100, "% of locked frames"],
+  ];
+  $("linkList").innerHTML = link.map(([k, v, u]) =>
+    `<div class="spec-row"><span class="k">${k}</span><span class="v" style="font-size:17px">${v == null ? "–" : fmt(v)}</span><span class="t">${u}</span></div>`).join("");
+}
+
+function onStatus(s) {
+  status = s;
+  renderSpec(s.metrics);
+  const info = s.info || {};
+  $("desc").textContent = describeRun(info) + (info.realtime === false ? ", fast mode" : "");
+  if (s.error) toast("Engine error: " + s.error, true);
+  if (!s.running && !finished && s.run_name) finish(s);
+}
+
+function finish(s) {
+  finished = true;
+  $("title").textContent = "Run finished";
+  $("stopBtn").hidden = true;
+  const b = $("doneBanner"); b.hidden = false;
+  const v = s.metrics ? overallVerdict(s.metrics) : "na";
+  b.classList.toggle("fail", v === "fail");
+  $("doneTitle").textContent = v === "pass" ? "Run saved. It meets every spec target." : "Run saved.";
+  $("doneSub").textContent = `${s.metrics ? s.metrics.simulation_duration_sec.toFixed(1) + " s simulated, " + s.frames + " frames" : ""}`;
+  $("reportLink").href = `/runs/${encodeURIComponent(s.run_name)}`;
+  if (ws) { ws.close(); ws = null; }
+}
+
+$("stopBtn").addEventListener("click", async () => {
+  $("stopBtn").disabled = true; $("stopBtn").textContent = "Saving";
+  try {
+    await api("/api/control/stop", { method: "POST" });
+    const s = await api("/api/control/status");
+    onStatus(s);
+    finish(s);
+  } catch (e) { toast(e.message, true); $("stopBtn").disabled = false; $("stopBtn").textContent = "Stop and save"; }
+});
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws/live`);
+  ws.onmessage = evt => {
+    const msg = JSON.parse(evt.data);
+    if (msg.type === "frames") { onFrames(msg.frames); scheduleCharts(); }
+    else if (msg.type === "snapshot") {
+      imgSize = msg.size; lastWorld = msg.world;
+      if (msg.world) {
+        camTrail.push(msg.world.cam); if (camTrail.length > 600) camTrail.shift();
+        if (msg.world.targets[0]) { worldTrail.push(msg.world.targets[0]); if (worldTrail.length > 600) worldTrail.shift(); }
+      }
+      img.onload = () => { lastImage = true; lastRecord = msg.record; draw(); };
+      img.src = msg.image;
+    } else if (msg.type === "status") onStatus(msg.status);
+  };
+  ws.onclose = () => { if (!finished) setTimeout(() => api("/api/control/status").then(s => s.running ? connect() : onStatus(s)).catch(() => {}), 1200); };
+}
+
+setInterval(() => {
+  if (!status || !status.metrics || finished) return;
+  $("clock").textContent = `${fmt(status.metrics.simulation_duration_sec, 1)} s`;
+}, 500);
+
+// ---------- boot ----------
+(async () => {
+  let s;
+  try { s = await api("/api/control/status"); } catch { $("idle").hidden = false; return; }
+  if (!s.run_name) { $("idle").hidden = false; return; }
+  $("live").hidden = false;
+  $("title").textContent = s.running ? "Tracking live" : "Last run";
+  setView("camera");
+  onStatus(s);
+  drawCharts();
+  if (s.running) connect();
+  else finish(s);
+})();
+</script>
+</body>
+</html>

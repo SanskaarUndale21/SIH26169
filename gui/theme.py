@@ -13,7 +13,7 @@ backdrop-filter/box-shadow equivalent -- QSS approximates the "glass
 panel" look with layered flat surface colours and coloured borders
 instead of real blur.
 
-Palette mirrors web/control_page.py's dark theme so the desktop app and
+Palette originally mirrored the old web control page's dark theme so the desktop app and
 the browser control page read as the same product.
 """
 from __future__ import annotations

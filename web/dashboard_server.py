@@ -1,15 +1,16 @@
-"""Web dashboard: browse past run logs/3D replays, AND drive a real live
-simulation run from the browser (web/live_engine.py) -- the desktop GUI
-and this page are two independent front-ends over the same real engine
-code (control/run_loop.TrackingRunner, config/param_schema.py), not two
-different implementations that could drift apart or disagree.
+"""Web console for the FSOC coarse-alignment tracker.
 
-This does import simulator/perception/control now (via live_engine.py),
-a deliberate trade made when the product's scope grew to "the web UI is
-also a full control surface" -- earlier revisions of this file kept it
-strictly read-only/decoupled for demo-day reliability; that guarantee no
-longer holds for the /control page specifically. The /view/{name} replay
-and /api/runs browsing endpoints remain pure log readers regardless.
+Pages (each its own screen, served from web/ui/):
+    /            Overview: what the system does, latest results vs. spec
+    /setup       New run: step-by-step scenario builder with live previews
+    /live        Live: camera feed, lock state, whole-screen map, 3D gimbal
+    /runs        Runs: every recorded run with pass/fail against the spec
+    /runs/{name} Report: one run's scorecard, charts, replay, downloads
+    /spec        Spec check: every problem-statement requirement and status
+
+The live engine (web/live_engine.py) runs the same TrackingRunner the
+desktop GUI drives, configured through the same config/param_schema.py,
+so both front-ends produce identical runs for identical settings.
 
 Run with:
     python web/dashboard_server.py
@@ -18,30 +19,30 @@ then open http://127.0.0.1:8420/
 from __future__ import annotations
 
 import asyncio
+import base64
+import csv
+import io
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 LOGS_DIR = REPO_ROOT / "logs"
 STATIC_DIR = APP_DIR / "static"
+UI_DIR = APP_DIR / "ui"
 UPLOAD_DIR = REPO_ROOT / "data" / "uploaded_videos"
 
 sys.path.insert(0, str(REPO_ROOT))  # so live_engine's `from control...` imports resolve
 from web.live_engine import engine as live_engine  # noqa: E402
 from config.param_schema import schema_as_json, resolve_ui_values, apply_scenario_preset_if_set  # noqa: E402
 
-app = FastAPI(title="FSOC Tracker -- Dashboard & Live Control")
-# Three.js is served from a local file (web/static/), not a CDN, so both
-# the replay and live-control 3D views work with no internet connection
-# during a demo.
+app = FastAPI(title="FSOC Coarse Alignment Console")
+# Three.js and fonts fallbacks are local, so every page works offline at a demo.
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -51,30 +52,140 @@ def _load_default_config() -> dict:
         return yaml.safe_load(f)
 
 
+def _build_config(ui_values: dict) -> dict:
+    cfg = resolve_ui_values(_load_default_config(), ui_values or {})
+    return apply_scenario_preset_if_set(cfg)
+
+
 def _safe_run_name(run_name: str) -> str:
     if not run_name or ".." in run_name or "/" in run_name or "\\" in run_name:
         raise HTTPException(status_code=404, detail="run not found")
     return run_name
 
 
+def _is_summary_log(path: Path) -> bool:
+    return not path.stem.endswith("_config")
+
+
+def _run_meta(name: str) -> dict | None:
+    p = LOGS_DIR / f"{name}_config.json"
+    if not p.exists():
+        return None
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def _list_runs() -> list[dict]:
     if not LOGS_DIR.exists():
         return []
     runs = []
-    for json_path in sorted(LOGS_DIR.glob("*.json"), reverse=True):
+    for json_path in sorted(LOGS_DIR.glob("run_*.json"), reverse=True):
+        if not _is_summary_log(json_path):
+            continue
         try:
             with open(json_path) as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
-        runs.append({"name": json_path.stem, "metrics": data})
+        meta = _run_meta(json_path.stem)
+        runs.append({
+            "name": json_path.stem,
+            "metrics": data,
+            "info": meta["info"] if meta else None,
+            "has_frames": (LOGS_DIR / f"{json_path.stem}_frames.jsonl").exists(),
+        })
     return runs
 
 
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
+
+NAV = [
+    ("/", "overview", "Overview"),
+    ("/setup", "setup", "New run"),
+    ("/live", "live", "Live"),
+    ("/runs", "runs", "Runs"),
+    ("/spec", "spec", "Spec check"),
+]
+
+
+def _page(file: str, active: str, replacements: dict | None = None) -> HTMLResponse:
+    html = (UI_DIR / file).read_text(encoding="utf-8")
+    links = "".join(
+        f'<a href="{href}" class="nav-link{" is-active" if key == active else ""}"'
+        f'{" aria-current=\"page\"" if key == active else ""} data-nav="{key}">'
+        f'<span class="nav-ico" data-ico="{key}"></span><span>{label}</span></a>'
+        for href, key, label in NAV
+    )
+    sidebar = (
+        '<aside class="sidebar">'
+        '<a class="brand" href="/"><span data-brand></span>'
+        '<span><span class="brand-name" style="display:block">Coarse Alignment</span>'
+        '<span class="brand-sub">FSOC pointing console</span></span></a>'
+        f'<nav class="nav" aria-label="Main">{links}</nav>'
+        '<a class="engine-pill" id="engine-pill" href="/setup">'
+        '<span class="row"><span class="dot"></span><span class="label">Checking engine</span></span>'
+        '<span class="sub" style="display:block">One moment</span></a>'
+        '</aside>'
+    )
+    html = html.replace("<!--SIDEBAR-->", sidebar)
+    for k, v in (replacements or {}).items():
+        html = html.replace(k, v)
+    return HTMLResponse(html)
+
+
+@app.get("/", response_class=HTMLResponse)
+def page_overview():
+    return _page("overview.html", "overview")
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def page_setup():
+    return _page("setup.html", "setup")
+
+
+@app.get("/live", response_class=HTMLResponse)
+def page_live():
+    return _page("live.html", "live")
+
+
+@app.get("/runs", response_class=HTMLResponse)
+def page_runs():
+    return _page("runs.html", "runs")
+
+
+@app.get("/runs/{run_name}", response_class=HTMLResponse)
+def page_report(run_name: str):
+    run_name = _safe_run_name(run_name)
+    return _page("report.html", "runs", {"__RUN_NAME__": run_name})
+
+
+@app.get("/spec", response_class=HTMLResponse)
+def page_spec():
+    return _page("spec.html", "spec")
+
+
+# old URLs keep working
+@app.get("/control")
+def old_control():
+    return RedirectResponse("/setup")
+
+
+@app.get("/view/{run_name}")
+def old_view(run_name: str):
+    return RedirectResponse(f"/runs/{_safe_run_name(run_name)}")
+
+
+# ---------------------------------------------------------------------------
+# Run logs (read-only)
+# ---------------------------------------------------------------------------
+
 @app.get("/api/runs")
 def api_runs() -> JSONResponse:
-    """Lists every run log found in logs/, newest first. Read-only --
-    this endpoint cannot trigger a new run or modify anything."""
     return JSONResponse(_list_runs())
 
 
@@ -86,42 +197,83 @@ def api_run_detail(run_name: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail="run not found")
     with open(json_path) as f:
         data = json.load(f)
-    data["_has_3d_frames"] = (LOGS_DIR / f"{run_name}_frames.jsonl").exists()
-    return JSONResponse(data)
+    meta = _run_meta(run_name)
+    return JSONResponse({
+        "name": run_name,
+        "metrics": data,
+        "info": meta["info"] if meta else None,
+        "config": meta["config"] if meta else None,
+        "has_frames": (LOGS_DIR / f"{run_name}_frames.jsonl").exists(),
+    })
 
 
-@app.get("/api/runs/{run_name}/frames")
-def api_run_frames(run_name: str) -> JSONResponse:
-    """Returns the real per-frame trace of a run (perf_logging/frame_log.py's
-    FrameRecord, one per line), exactly as recorded during that run --
-    no interpolation or synthesis. 404 if this run predates frame-level
-    logging or was a raw-video run with no camera geometry to record."""
-    run_name = _safe_run_name(run_name)
+def _read_frames(run_name: str) -> list[dict]:
     frames_path = LOGS_DIR / f"{run_name}_frames.jsonl"
     if not frames_path.exists():
-        raise HTTPException(status_code=404,
-                             detail="no per-frame log for this run (predates frame logging, "
-                                    "or was recorded in raw-video mode with no camera geometry)")
+        raise HTTPException(status_code=404, detail="this run has no per-frame log")
     records = []
     with open(frames_path) as f:
         for line in f:
             line = line.strip()
             if line:
                 records.append(json.loads(line))
-    return JSONResponse(records)
+    return records
+
+
+@app.get("/api/runs/{run_name}/frames")
+def api_run_frames(run_name: str) -> JSONResponse:
+    return JSONResponse(_read_frames(_safe_run_name(run_name)))
+
+
+@app.get("/api/runs/{run_name}/centroids.csv")
+def api_run_centroids(run_name: str) -> Response:
+    """Per-frame centroiding log (Benchmark 1 and 2 ask for this): the
+    detected centroid, the tracker estimate, ground truth when the run had
+    one, and the centroiding error against it."""
+    run_name = _safe_run_name(run_name)
+    frames = _read_frames(run_name)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["frame_id", "timestamp_s", "lock_state", "detected", "centroid_x", "centroid_y",
+                "estimate_x", "estimate_y", "truth_x", "truth_y", "centroid_error_px", "estimate_error_px"])
+    for r in frames:
+        c = r.get("centroid_px") or [None, None]
+        p = r.get("predicted_px") or [None, None]
+        gts = r.get("ground_truth_px") or []
+        g = [None, None]
+        c_err = p_err = None
+        if gts:
+            ref = c if c[0] is not None else p
+            g = min(gts, key=lambda t: (t[0] - ref[0]) ** 2 + (t[1] - ref[1]) ** 2) if ref[0] is not None else gts[0]
+            if c[0] is not None:
+                c_err = round(((c[0] - g[0]) ** 2 + (c[1] - g[1]) ** 2) ** 0.5, 3)
+            if p[0] is not None:
+                p_err = round(((p[0] - g[0]) ** 2 + (p[1] - g[1]) ** 2) ** 0.5, 3)
+        w.writerow([r["frame_id"], round(r["timestamp"], 4), r["lock_state"], int(bool(r["detected"])),
+                    *(round(v, 3) if v is not None else "" for v in (c[0], c[1], p[0], p[1], g[0], g[1])),
+                    "" if c_err is None else c_err, "" if p_err is None else p_err])
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{run_name}_centroids.csv"'})
+
+
+@app.get("/api/runs/{run_name}/download/{kind}")
+def api_run_download(run_name: str, kind: str):
+    run_name = _safe_run_name(run_name)
+    files = {"json": f"{run_name}.json", "csv": f"{run_name}.csv", "frames": f"{run_name}_frames.jsonl"}
+    if kind not in files:
+        raise HTTPException(status_code=404, detail="unknown download")
+    path = LOGS_DIR / files[kind]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="file not found for this run")
+    return FileResponse(path, filename=files[kind])
 
 
 # ---------------------------------------------------------------------------
-# Live control: real simulation runs started/stopped/configured from the
-# browser, via web/live_engine.py's LiveEngine (the same real engine code
-# gui/main_window.py drives, not a reimplementation).
+# Config + preview
 # ---------------------------------------------------------------------------
 
 @app.get("/api/config/schema")
 def api_config_schema() -> JSONResponse:
-    """The single parameter schema both this page and the desktop GUI
-    build their forms from (config/param_schema.py) -- so the two UIs
-    can't silently expose different knobs."""
     return JSONResponse(schema_as_json())
 
 
@@ -130,6 +282,48 @@ def api_config_default() -> JSONResponse:
     return JSONResponse(_load_default_config())
 
 
+@app.post("/api/preview")
+def api_preview(payload: dict) -> JSONResponse:
+    """Renders one real camera frame for the given settings, with the
+    camera pointed at the first target, so the setup page can show what
+    the chosen noise/atmosphere/jitter actually does to the image before
+    a run starts. Uses the real SimulatorEngine, not a mock."""
+    import cv2
+    from simulator.camera_model import CameraModel
+    from simulator.disturbances import DisturbanceConfig
+    from simulator.renderer import SimulatorEngine
+    from simulator.scene import Scene
+    try:
+        cfg = _build_config(payload.get("ui_values", {}))
+        scene = Scene.from_config(cfg)
+        cam_cfg = cfg["camera"]
+        tx, ty = scene.targets[0].position(0.0) if scene.targets else (cfg["screen"]["width"] / 2,) * 2
+        camera = CameraModel(width_px=cam_cfg["resolution"][0], height_px=cam_cfg["resolution"][1],
+                             fov_x_deg=cam_cfg["fov_deg"][0], fov_y_deg=cam_cfg["fov_deg"][1],
+                             world_x=tx, world_y=ty)
+        dcfg = DisturbanceConfig.from_config(cfg)
+        dcfg.platform_motion = False
+        engine = SimulatorEngine(scene, camera, dcfg, seed=7)
+        img, _ = engine.render()
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        paths = []
+        for t in scene.targets:
+            pts = [t.position(i * 0.25) for i in range(0, 241)]
+            paths.append([[round(x, 1), round(y, 1)] for x, y in pts])
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({
+        "image": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode(),
+        "screen": [cfg["screen"]["width"], cfg["screen"]["height"]],
+        "fov_world": [cam_cfg["fov_deg"][0] * camera.world_px_per_deg, cam_cfg["fov_deg"][1] * camera.world_px_per_deg],
+        "paths": paths,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Live control
+# ---------------------------------------------------------------------------
+
 @app.post("/api/control/upload_video")
 async def api_upload_video(file: UploadFile) -> JSONResponse:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -137,22 +331,18 @@ async def api_upload_video(file: UploadFile) -> JSONResponse:
     dest = UPLOAD_DIR / safe_name
     with open(dest, "wb") as f:
         f.write(await file.read())
-    return JSONResponse({"path": str(dest)})
+    return JSONResponse({"path": str(dest), "name": safe_name})
 
 
 @app.post("/api/control/start")
-async def api_control_start(payload: dict) -> JSONResponse:
-    """payload: {"ui_values": {<path/string>: value, ...}, "video_path": optional str}.
-    ui_values is resolved against config/default_config.yaml through the
-    exact same config/param_schema.py machinery the desktop GUI uses, so
-    a web-started run and a GUI-started run with the same slider values
-    produce the same config dict, not two independently-guessed ones."""
-    base_cfg = _load_default_config()
-    ui_values = payload.get("ui_values", {})
-    cfg = resolve_ui_values(base_cfg, ui_values)
-    cfg = apply_scenario_preset_if_set(cfg)
+def api_control_start(payload: dict) -> JSONResponse:
+    """payload: {"ui_values": {path: value}, "video_path": str|None, "realtime": bool}.
+    ui_values resolve through the same config/param_schema.py the desktop
+    GUI uses."""
     try:
-        result = live_engine.start(cfg, video_path=payload.get("video_path"))
+        cfg = _build_config(payload.get("ui_values", {}))
+        result = live_engine.start(cfg, str(LOGS_DIR), video_path=payload.get("video_path"),
+                                   realtime=bool(payload.get("realtime", True)))
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
@@ -163,7 +353,7 @@ async def api_control_start(payload: dict) -> JSONResponse:
 @app.post("/api/control/stop")
 def api_control_stop() -> JSONResponse:
     try:
-        result = live_engine.stop(str(LOGS_DIR))
+        result = live_engine.stop()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return JSONResponse(result)
@@ -176,306 +366,42 @@ def api_control_status() -> JSONResponse:
 
 @app.websocket("/ws/live")
 async def ws_live(websocket: WebSocket):
-    """Streams real per-frame telemetry (identical FrameRecord schema to
-    the .jsonl replay files) as it's produced by the live engine, plus a
-    periodic status/metrics message. No control happens over this socket
-    -- it is receive-only from the browser's perspective; start/stop go
-    through the POST endpoints above."""
+    """Streams per-frame telemetry (same FrameRecord schema as the replay
+    files), the latest camera image as JPEG (~12 per second) with its
+    matching record and world state, and a status message. Receive-only;
+    start/stop go through the POST endpoints."""
+    import cv2
     await websocket.accept()
+    last_seq = -1
+    tick = 0
     try:
         while True:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.04)
+            tick += 1
             frames = live_engine.pop_new_frames()
             if frames:
                 await websocket.send_json({"type": "frames", "frames": frames})
-            await websocket.send_json({"type": "status", "status": live_engine.status()})
-    except WebSocketDisconnect:
+            if tick % 2 == 0:
+                snap = live_engine.snapshot()
+                if snap is not None and snap[0] != last_seq:
+                    seq, img, record, world = snap
+                    last_seq = seq
+                    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ok:
+                        await websocket.send_json({
+                            "type": "snapshot",
+                            "image": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode(),
+                            "size": [int(img.shape[1]), int(img.shape[0])],
+                            "record": record, "world": world,
+                        })
+            if tick % 5 == 0:
+                await websocket.send_json({"type": "status", "status": live_engine.status()})
+    except (WebSocketDisconnect, RuntimeError):
         pass
-
-
-@app.get("/control", response_class=HTMLResponse)
-def control_page() -> str:
-    return _CONTROL_HTML
-
-
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    return _PAGE_HTML
-
-
-@app.get("/view/{run_name}", response_class=HTMLResponse)
-def view_3d(run_name: str) -> str:
-    run_name = _safe_run_name(run_name)
-    return _VIEW3D_HTML.replace("__RUN_NAME__", run_name)
-
-
-_PAGE_HTML = r"""<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>FSOC Tracker -- Results Dashboard</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0;
-         background: #0f1117; color: #e5e7eb; }
-  header { padding: 20px 28px; border-bottom: 1px solid #23262f; }
-  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-  header p { margin: 4px 0 0; color: #8b8f9a; font-size: 13px; }
-  .badge { display: inline-block; background: #1e293b; color: #7dd3fc;
-           padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
-  .nav-link { float: right; font-size: 13px; color: #60a5fa; text-decoration: none; font-weight: 500; }
-  .nav-link:hover { text-decoration: underline; }
-  main { display: grid; grid-template-columns: 280px 1fr; gap: 0; min-height: calc(100vh - 80px); }
-  #runlist { border-right: 1px solid #23262f; overflow-y: auto; }
-  .run-item { padding: 12px 20px; cursor: pointer; border-bottom: 1px solid #1a1c24; font-size: 13px; }
-  .run-item:hover { background: #171922; }
-  .run-item.active { background: #1e2530; border-left: 3px solid #60a5fa; }
-  .run-item .name { font-weight: 600; }
-  .run-item .verdict { font-size: 11px; margin-top: 4px; }
-  .verdict.pass { color: #4ade80; }
-  .verdict.fail { color: #f87171; }
-  #detail { padding: 24px 32px; }
-  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-                   gap: 12px; margin-top: 16px; }
-  .metric-card { background: #171922; border: 1px solid #23262f; border-radius: 8px; padding: 14px; }
-  .metric-card .label { font-size: 11px; color: #8b8f9a; text-transform: uppercase; letter-spacing: 0.03em; }
-  .metric-card .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
-  .metric-card .unit { font-size: 12px; color: #8b8f9a; margin-left: 4px; }
-  .metric-card.ok .value { color: #4ade80; }
-  .metric-card.bad .value { color: #f87171; }
-  .metric-card.na .value { color: #6b7280; }
-  .empty { color: #6b7280; padding: 40px; text-align: center; }
-  .raw { margin-top: 24px; }
-  .raw pre { background: #0a0b0f; padding: 16px; border-radius: 8px; overflow-x: auto;
-             font-size: 12px; color: #a1a1aa; }
-  .disclaimer { background: #1e2530; border: 1px solid #2d3444; border-radius: 6px;
-                padding: 10px 14px; font-size: 12px; color: #93c5fd; margin-bottom: 20px; }
-  .replay-btn { display: inline-block; margin-left: 12px; background: #2563eb; color: white;
-                padding: 3px 10px; border-radius: 5px; text-decoration: none; font-size: 12px; }
-  .replay-btn.disabled { background: #374151; color: #9ca3af; cursor: default; }
-</style>
-</head>
-<body>
-<header>
-  <h1>FSOC Coarse-Alignment Tracker <span class="badge">results &amp; replay</span>
-    <a href="/control" class="nav-link">Open Live Control &rarr;</a></h1>
-  <p>Browses logs already written by past runs (from here or the desktop app). For starting a new
-     live run from the browser, use <a href="/control">Live Control</a>.</p>
-</header>
-<main>
-  <div id="runlist"><div class="empty">Loading...</div></div>
-  <div id="detail"><div class="empty">Select a run on the left.</div></div>
-</main>
-<script>
-const THRESHOLDS = {
-  acquisition_time_sec: {op: "<=", val: 2.0, unit: "s"},
-  avg_tracking_error_px: {op: "<=", val: 10.0, unit: "px"},
-  max_tracking_error_px: {op: "<=", val: 10.0, unit: "px"},
-  fps: {op: ">=", val: 20.0, unit: "FPS"},
-  lock_retention_rate: {op: ">=", val: 0.95, unit: ""},
-};
-
-function verdictClass(key, val) {
-  const t = THRESHOLDS[key];
-  if (!t || val === null || val === undefined) return "na";
-  const ok = t.op === "<=" ? val <= t.val : val >= t.val;
-  return ok ? "ok" : "bad";
-}
-
-function fmt(val, unit) {
-  if (val === null || val === undefined) return "N/A";
-  if (Array.isArray(val)) return val.length + " event(s)";
-  if (typeof val === "number") return val.toFixed(val < 10 ? 3 : 2) + (unit ? " " + unit : "");
-  return String(val);
-}
-
-async function loadRuns() {
-  const res = await fetch("/api/runs");
-  const runs = await res.json();
-  const list = document.getElementById("runlist");
-  if (runs.length === 0) {
-    list.innerHTML = '<div class="empty">No runs yet.<br>Run main.py, Start/Stop a session, then refresh.</div>';
-    return;
-  }
-  list.innerHTML = "";
-  runs.forEach((run, i) => {
-    const m = run.metrics;
-    const overall = ["acquisition_time_sec","avg_tracking_error_px","fps"]
-      .map(k => verdictClass(k, m[k]))
-      .filter(c => c !== "na");
-    const verdictText = overall.length === 0 ? "no data" : (overall.every(c => c === "ok") ? "PASS" : "attention");
-    const div = document.createElement("div");
-    div.className = "run-item" + (i === 0 ? " active" : "");
-    div.innerHTML = `<div class="name">${run.name}</div>
-      <div class="verdict ${verdictText === 'PASS' ? 'pass' : verdictText === 'attention' ? 'fail' : ''}">${verdictText}</div>`;
-    div.onclick = () => selectRun(run.name, div);
-    list.appendChild(div);
-  });
-  if (runs.length > 0) selectRun(runs[0].name, list.firstChild);
-}
-
-async function selectRun(name, el) {
-  document.querySelectorAll(".run-item").forEach(x => x.classList.remove("active"));
-  if (el) el.classList.add("active");
-  const res = await fetch(`/api/runs/${encodeURIComponent(name)}`);
-  const m = await res.json();
-  const detail = document.getElementById("detail");
-  const cards = Object.entries(m).map(([key, val]) => {
-    const cls = verdictClass(key, val);
-    const unit = THRESHOLDS[key] ? THRESHOLDS[key].unit : "";
-    return `<div class="metric-card ${cls}">
-      <div class="label">${key.replace(/_/g, " ")}</div>
-      <div class="value">${fmt(val, unit)}</div>
-    </div>`;
-  }).join("");
-  const replayBtn = m._has_3d_frames
-    ? `<a href="/view/${encodeURIComponent(name)}" class="replay-btn" target="_blank">Open 3D Replay &#8599;</a>`
-    : `<span class="replay-btn disabled" title="No per-frame log for this run">3D Replay unavailable</span>`;
-  detail.innerHTML = `
-    <div class="disclaimer">Showing recorded results from <b>${name}</b>. This page only reads the log file -- it cannot start or affect a run. ${replayBtn}</div>
-    <div class="metrics-grid">${cards}</div>
-    <div class="raw"><div class="label" style="color:#8b8f9a;font-size:12px;margin-bottom:8px;">Raw JSON</div>
-      <pre>${JSON.stringify(m, null, 2)}</pre></div>`;
-}
-
-loadRuns();
-</script>
-</body>
-</html>"""
-
-
-_VIEW3D_HTML = r"""<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>3D Replay -- __RUN_NAME__</title>
-<style>
-  html, body { margin: 0; background: #0a0b0f; color: #e5e7eb; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-               overflow: hidden; }
-  #canvas-holder { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-  #hud { position: absolute; top: 0; left: 0; padding: 14px 18px; pointer-events: none; }
-  #hud h1 { font-size: 14px; margin: 0 0 4px; font-weight: 600; }
-  #hud .note { font-size: 11px; color: #9ca3af; max-width: 420px; line-height: 1.4; }
-  #legend { position: absolute; top: 14px; right: 18px; font-size: 11px; background: rgba(15,17,23,0.75);
-            border: 1px solid #23262f; border-radius: 8px; padding: 10px 14px; }
-  #legend div { margin: 3px 0; }
-  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
-  #controls { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(15,17,23,0.9);
-              border-top: 1px solid #23262f; padding: 12px 18px; display: flex; align-items: center; gap: 12px; }
-  #controls button { background: #1e293b; color: #e5e7eb; border: 1px solid #334155; border-radius: 6px;
-                      padding: 6px 14px; cursor: pointer; font-size: 13px; }
-  #controls button:hover { background: #263447; }
-  #scrub { flex: 1; }
-  #frame-label { font-size: 12px; color: #9ca3af; min-width: 170px; }
-  #status { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-             font-size: 13px; color: #9ca3af; }
-</style>
-</head>
-<body>
-<div id="canvas-holder"></div>
-<div id="hud">
-  <h1>3D PAT Replay -- __RUN_NAME__</h1>
-  <div class="note">Real recorded telemetry, replayed frame-by-frame. Copper cone = coarse assembly
-    boresight (actual PTZ pan/tilt this frame). Green dot = the beacon's simulator ground truth.
-    Yellow dot = the coarse tracker's estimate (predicted_px, converted back to an absolute angle).
-    Positions are drawn at a fixed display range -- this simulator is 2D and does not model true 3D
-    distance.</div>
-</div>
-<div id="legend">
-  <div><span class="dot" style="background:#d98a4f"></span>Cone = coarse assembly boresight (real pan/tilt)</div>
-  <div><span class="dot" style="background:#4ade80"></span>Beacon (ground truth)</div>
-  <div><span class="dot" style="background:#facc15"></span>Coarse-tracked estimate</div>
-  <div style="margin-top:6px;color:#5b6070;">Cone colour = lock state:</div>
-  <div><span class="dot" style="background:#ef4444"></span>Searching</div>
-  <div><span class="dot" style="background:#eab308"></span>Acquiring / reacquiring</div>
-  <div><span class="dot" style="background:#22c55e"></span>Locked</div>
-</div>
-<div id="status">Loading real run data...</div>
-<div id="controls" style="display:none">
-  <button id="playBtn">Pause</button>
-  <input type="range" id="scrub" min="0" max="0" value="0">
-  <div id="frame-label">frame 0 / 0</div>
-</div>
-
-<script type="importmap">
-{ "imports": { "three": "/static/three.module.min.js" } }
-</script>
-<script type="module">
-import { createPATScene } from "/static/pat_scene.js";
-
-const RUN_NAME = "__RUN_NAME__";
-const patScene = createPATScene(document.getElementById("canvas-holder"));
-patScene.startRenderLoop();
-
-let frames = [];
-let idx = 0;
-let playing = true;
-
-function showFrame(rec) {
-  patScene.applyFrame(rec);
-  document.getElementById("frame-label").textContent =
-    `frame ${rec.frame_id} / ${frames.length - 1}   t=${rec.timestamp.toFixed(2)}s   lock=${rec.lock_state}`;
-}
-
-async function load() {
-  const status = document.getElementById("status");
-  try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(RUN_NAME)}/frames`);
-    if (!res.ok) {
-      const err = await res.json();
-      status.textContent = "No 3D data: " + (err.detail || res.statusText);
-      return;
-    }
-    frames = await res.json();
-  } catch (e) {
-    status.textContent = "Failed to load run data: " + e;
-    return;
-  }
-  if (frames.length === 0) {
-    status.textContent = "This run has no recorded frames.";
-    return;
-  }
-  status.style.display = "none";
-  document.getElementById("controls").style.display = "flex";
-  const scrub = document.getElementById("scrub");
-  scrub.max = frames.length - 1;
-  scrub.addEventListener("input", () => {
-    idx = parseInt(scrub.value, 10); playing = false; playBtn.textContent = "Play"; showFrame(frames[idx]);
-  });
-  showFrame(frames[0]);
-}
-
-const playBtn = document.getElementById("playBtn");
-playBtn.addEventListener("click", () => {
-  playing = !playing;
-  playBtn.textContent = playing ? "Pause" : "Play";
-});
-
-let lastAdvance = performance.now();
-function advance() {
-  requestAnimationFrame(advance);
-  const now = performance.now();
-  if (playing && frames.length > 0 && now - lastAdvance > 33) {
-    idx = (idx + 1) % frames.length;
-    document.getElementById("scrub").value = idx;
-    showFrame(frames[idx]);
-    lastAdvance = now;
-  }
-}
-
-load();
-advance();
-</script>
-</body>
-</html>"""
-
-
-from web.control_page import CONTROL_HTML as _CONTROL_HTML  # noqa: E402
 
 
 if __name__ == "__main__":
     import uvicorn
     print(f"Reading run logs from: {LOGS_DIR}")
-    print("Open http://127.0.0.1:8420/       for results & replay")
-    print("Open http://127.0.0.1:8420/control for live simulation control")
+    print("Open http://127.0.0.1:8420/")
     uvicorn.run(app, host="127.0.0.1", port=8420, log_level="warning")

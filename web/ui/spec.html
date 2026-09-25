@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec Check</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .summary-strip { display: flex; flex-wrap: wrap; gap: 28px; margin-bottom: 28px; color: var(--dim); }
+  .summary-strip b { display: block; font-stretch: 125%; font-weight: 800; font-size: 34px; color: var(--text); line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .sec { margin-top: 30px; }
+  .sec h2 { margin-bottom: 12px; }
+  table.spec td:first-child { width: 34%; }
+  table.spec td .req { display: block; color: var(--faint); font-size: 12.5px; margin-top: 2px; }
+  table.spec td.how { color: var(--dim); }
+  table.spec td.st { width: 1%; white-space: nowrap; text-align: right; }
+  .jump { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .jump a { font-size: 13px; text-decoration: none; padding: 5px 11px; border-radius: 99px; border: 1px solid var(--rule-soft); color: var(--dim); }
+  .jump a:hover { color: var(--text); border-color: var(--rule); }
+  @media (max-width: 760px) { table.spec td.how { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Spec check</h1>
+      <p class="lede">Every requirement in problem statement 26169 (ISRO, Department of Space), what the system does about it, and where the performance numbers stand on the latest run.</p>
+    </div>
+  </div>
+  <div class="summary-strip" id="strip"></div>
+  <nav class="jump" id="jump" aria-label="Sections"></nav>
+  <div id="sections"></div>
+</main>
+</div>
+<script type="module">
+import { SPEC, judge, fmt, api, runDate } from "/static/app.js";
+
+const DONE = "met", OPT = "optional", MEAS = "measured";
+const S = [
+  { id: "camera", title: "Camera", rows: [
+    ["Screen size", "min. 2000 × 2000 px, user-defined", "Default 2000 × 2000, adjustable 500 to 5000 px per side", DONE],
+    ["Camera type", "Monochrome focal plane array (colour optional)", "8-bit monochrome sensor with a dark-current floor. Colour is not modelled", DONE],
+    ["Resolution", "640 × 480 px, user-defined", "Default 640 × 480, adjustable up to 1920 × 1080", DONE],
+    ["Field of view", "User-defined, default 4° × 3°", "Default 4° × 3°, 0.5° to 30° per axis", DONE],
+    ["Update rate", "30 Hz minimum", "Default 30 Hz, 10 to 120 Hz; real-time pacing on the live console", DONE],
+    ["Initial camera position", "Centre of the screen", "Boresight starts at the screen centre, which is also the pan and tilt zero", DONE],
+  ]},
+  { id: "target", title: "Target", rows: [
+    ["Target type", "Beacon spot", "Bright spot rendered into the sensor image", DONE],
+    ["Number of targets", "1 mandatory, multiple optional", "1 to 5 targets; the tracker follows the one nearest its prediction", DONE],
+    ["Shape", "User-defined, default square", "Square or circle (ellipse when width and height differ)", DONE],
+    ["Size", "5–20 × 5–20 px, default 10 × 10", "Width and height set independently, 5 to 20 px", DONE],
+    ["Initial location", "User-defined, default random", "Random near the centre, fixed centre, or any [x, y] in the config file", DONE],
+    ["Motion", "Straight line, circular, figure of 8, random", "All four, plus spiral, sinusoidal and a user-defined waypoint path", DONE],
+    ["Optional motion", "Spiral, sinusoidal, user-defined", "All three built, each with its own parameters", OPT],
+  ]},
+  { id: "gimbal", title: "Camera motion", rows: [
+    ["Max pan speed", "5–10 °/s, default 5", "Default 5 °/s, adjustable 1 to 30 °/s, enforced by the gimbal model", DONE],
+    ["Max tilt speed", "5–10 °/s, default 5", "Default 5 °/s, adjustable 1 to 30 °/s", DONE],
+    ["Update interval", "≥ 20 Hz", "Pointing commands issued every frame (30 Hz by default)", DONE],
+  ]},
+  { id: "perf", title: "Performance", perf: true },
+  { id: "dist", title: "Disturbances and noise", rows: [
+    ["Image noise", "Salt and pepper ~10%, Gaussian, Poisson; one or more", "All three, individually switchable and stackable", DONE],
+    ["Noise standard deviation", "Up to 20 px, user-defined", "Gaussian σ adjustable 0 to 30", DONE],
+    ["Camera jitter", "± 20 px per frame, user-defined", "Uniform random shift up to ±30 px, or resonant vibration at a chosen frequency", DONE],
+    ["Atmosphere", "Clear, haze, fog, rain, low light", "All five, with a severity control for the contrast and brightness loss", DONE],
+    ["Platform motion", "± 20 px/frame; linear mandatory, others optional", "Linear, circular, random, spiral and figure of 8 drift up to 20 px/frame", DONE],
+    ["Turbulence", "Named in the expected solution", "Kolmogorov phase screen, optionally derived from a Hufnagel-Valley profile", OPT],
+  ]},
+  { id: "func", title: "Expected functions", rows: [
+    ["Configurable virtual environment", "", "Scene, camera, target and disturbances all set from one schema", DONE],
+    ["One or more moving targets", "", "Up to 5, seven motion types", DONE],
+    ["Movable virtual camera", "", "Pan-tilt gimbal with rate limits", DONE],
+    ["Automatic beacon detection", "", "Difference-of-Gaussians detector with adaptive noise threshold, optional learned false-positive filter", DONE],
+    ["Continuous tracking", "", "Interacting multiple-model filter with a lock state machine", DONE],
+    ["Camera control", "", "PID pointing loop, spiral then raster search when the beacon is lost", DONE],
+    ["Disturbance injection", "", "Noise, jitter, weather, turbulence and platform drift in the camera feed", DONE],
+    ["Real-time performance display", "", "Live page: camera feed, lock state, error chart, spec scores", DONE],
+  ]},
+  { id: "deliver", title: "Deliverables", rows: [
+    ["Standalone executable", "", "PyInstaller build of the desktop app (dist/fsoc-coarse-tracker)", DONE],
+    ["Source code", "Modular and commented", "simulator, perception, control, gui, web and perf_logging packages", DONE],
+    ["Technical report", "10–15 pages", "docs/technical_report.md", DONE],
+    ["User manual", "Installation, operation, parameters, GUI", "docs/user_manual.md", DONE],
+    ["Performance log", "Duration, FPS, acquisition, errors, retention, processing time", "Written automatically as JSON and CSV at the end of every run", DONE],
+    ["Benchmark 2: video input", "Bypass the camera, take .mp4 as input", "Video file source feeds the same detection and tracking pipeline", DONE],
+    ["Centroiding error log", "Per-frame centroid log for comparison", "Centroid log CSV on every run report", DONE],
+    ["Demo video", "3–5 minutes, optional", "Recorded by the team from the live console", OPT],
+  ]},
+];
+
+const CHIP = { met: ["pass", "Met"], optional: ["beacon", "Optional, built"], pass: ["pass", "Meets"], fail: ["fail", "Misses"], na: ["", "No data"] };
+
+(async () => {
+  let runs = [];
+  try { runs = await api("/api/runs"); } catch {}
+  const latest = runs[0];
+  let met = 0, total = 0;
+  const html = S.map(sec => {
+    let body;
+    if (sec.perf) {
+      body = SPEC.map(s => {
+        const v = latest ? s.get(latest.metrics) : null;
+        const verdict = judge(s, v);
+        total++; if (verdict === "pass" || (v == null && s.noneText && latest && latest.metrics.acquisition_time_sec != null)) met++;
+        const shown = v == null ? (s.noneText && latest && latest.metrics.acquisition_time_sec != null ? s.noneText : "not measured yet") : `${fmt(v)} ${s.unit}`;
+        const chip = v == null && s.noneText && latest && latest.metrics.acquisition_time_sec != null ? CHIP.pass : CHIP[verdict];
+        return `<tr><td>${s.label}<span class="req">${s.note}</span></td><td class="how">Latest run: ${shown}</td>
+          <td class="st"><span class="chip ${chip[0]}">${chip[1]}</span></td></tr>`;
+      }).join("");
+      const note = latest ? `Measured on the run from ${runDate(latest.name)}. <a href="/runs/${encodeURIComponent(latest.name)}">Open its report</a>.`
+        : `No run recorded yet. <a href="/setup">Start one</a> to measure these.`;
+      return `<section class="sec" id="${sec.id}"><h2>${sec.title}</h2><p class="muted small" style="margin:-4px 0 12px">${note}</p>
+        <div class="panel" style="padding:6px 8px"><table class="data spec"><tbody>${body}</tbody></table></div></section>`;
+    }
+    body = sec.rows.map(([name, req, how, st]) => {
+      total++; met++;
+      return `<tr><td>${name}${req ? `<span class="req">${req}</span>` : ""}</td><td class="how">${how}</td>
+        <td class="st"><span class="chip ${CHIP[st][0]}">${CHIP[st][1]}</span></td></tr>`;
+    }).join("");
+    return `<section class="sec" id="${sec.id}"><h2>${sec.title}</h2>
+      <div class="panel" style="padding:6px 8px"><table class="data spec"><tbody>${body}</tbody></table></div></section>`;
+  }).join("");
+  document.getElementById("sections").innerHTML = html;
+  document.getElementById("jump").innerHTML = S.map(s => `<a href="#${s.id}">${s.title}</a>`).join("");
+  document.getElementById("strip").innerHTML =
+    `<div><b>${met} / ${total}</b>requirements met</div>
+     <div><b>${runs.length}</b>runs recorded</div>`;
+})();
+</script>
+</body>
+</html>

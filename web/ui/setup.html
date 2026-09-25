@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Run Setup</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .builder { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(300px, 380px); gap: 28px; align-items: start; }
+  .stepper { position: sticky; top: 28px; display: grid; gap: 4px; counter-reset: step; }
+  .stepper button {
+    display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center; text-align: left;
+    background: transparent; border: 0; padding: 10px 10px; border-radius: var(--r-md); cursor: pointer; color: var(--dim);
+  }
+  .stepper button:hover { background: rgba(255,255,255,.04); color: var(--text); }
+  .stepper .n { width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--rule); display: grid; place-items: center; font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .stepper button[aria-current=step] { color: var(--text); background: var(--deck); }
+  .stepper button[aria-current=step] .n { border-color: var(--beacon); background: var(--beacon); color: var(--beacon-ink); }
+  .stepper button.done .n { border-color: var(--lock); color: var(--lock); }
+  .stepper .t { font-weight: 600; font-size: 14px; line-height: 1.2; }
+  .stepper .d { font-size: 12px; color: var(--faint); }
+
+  .step-panel { display: none; }
+  .step-panel.on { display: block; }
+  .step-intro { margin: 0 0 22px; }
+  .step-intro h2 { font-size: 24px; }
+  .group { padding: 22px 0; border-top: 1px solid var(--rule-soft); }
+  .group:first-of-type { border-top: 0; padding-top: 0; }
+  .group > h3 { font-stretch: 110%; font-size: 15.5px; margin-bottom: 14px; }
+  .group .group-note { margin: -8px 0 14px; font-size: 13px; color: var(--faint); }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px 28px; }
+  .fields .field + .field { margin-top: 0; }
+  .sub-block { background: var(--ink); border: 1px solid var(--rule-soft); border-radius: var(--r-md); padding: 14px 16px; }
+  .sub-block + .sub-block { margin-top: 10px; }
+  .sub-block .fields { margin-top: 14px; }
+  .sub-block .fields[hidden] { display: none; }
+  .toggle-title { font-weight: 620; }
+  .toggle-help { font-size: 12.5px; color: var(--faint); font-weight: 400; }
+
+  .choice-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .choice {
+    text-align: left; padding: 18px; border-radius: var(--r-lg); background: var(--ink); border: 1.5px solid var(--rule-soft); cursor: pointer; display: grid; gap: 6px;
+  }
+  .choice:hover { border-color: var(--rule); }
+  .choice[aria-pressed=true] { border-color: var(--beacon); background: var(--deck-2); }
+  .choice strong { font-stretch: 110%; font-size: 16px; }
+  .choice span { color: var(--dim); font-size: 13.5px; }
+  .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .preset { text-align: left; padding: 14px 16px; border-radius: var(--r-md); background: var(--ink); border: 1px solid var(--rule-soft); cursor: pointer; }
+  .preset:hover { border-color: var(--rule); }
+  .preset[aria-pressed=true] { border-color: var(--lock); }
+  .preset strong { display: block; font-size: 14px; margin-bottom: 3px; }
+  .preset span { font-size: 12.5px; color: var(--dim); }
+  .drop { display: grid; place-items: center; text-align: center; gap: 6px; padding: 30px 20px; border: 1.5px dashed var(--rule); border-radius: var(--r-lg); background: var(--ink); cursor: pointer; }
+  .drop.over { border-color: var(--beacon); background: var(--beacon-wash); }
+  .drop strong { font-size: 15px; }
+
+  .step-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--rule-soft); }
+  .preview-col { position: sticky; top: 28px; display: grid; gap: 16px; }
+  .preview-col .panel { padding: 16px; }
+  .cam-frame { position: relative; aspect-ratio: 4 / 3; border-radius: var(--r-md); overflow: hidden; background: #000; }
+  .cam-frame img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; display: block; }
+  .cam-frame .zoom { position: absolute; right: 8px; bottom: 8px; width: 34%; aspect-ratio: 4 / 3; border: 1.5px solid var(--lock); border-radius: 6px; background: #000; }
+  .cam-frame .zoom-label { position: absolute; right: 12px; bottom: calc(8px + 34% * 0.75 + 4px); font-size: 11px; color: var(--lock); }
+  .map { width: 100%; aspect-ratio: 1; border-radius: var(--r-md); background: var(--ink); }
+  .caption { font-size: 12.5px; color: var(--faint); margin-top: 8px; }
+  .summary { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13.5px; }
+  .summary dt { color: var(--faint); }
+  .summary dd { margin: 0; text-align: right; }
+  @media (max-width: 1200px) { .builder { grid-template-columns: 180px minmax(0, 1fr); } .preview-col { grid-column: 1 / -1; position: static; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); } }
+  @media (max-width: 760px) {
+    .builder { grid-template-columns: 1fr; }
+    .stepper { position: static; grid-auto-flow: column; overflow-x: auto; }
+    .stepper button { grid-template-columns: 26px auto; }
+    .stepper .d { display: none; }
+    .stepper .t { white-space: nowrap; }
+    .choice-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">New run</h1>
+      <p class="lede">Every setting starts at the problem statement's suggested value. Change only what your test needs, then start.</p>
+    </div>
+    <div class="actions">
+      <button class="btn quiet" id="resetBtn" type="button">Reset to defaults</button>
+      <button class="btn primary" id="startTop" type="button">Start run</button>
+    </div>
+  </div>
+
+  <div class="builder">
+    <nav class="stepper" id="stepper" aria-label="Setup steps"></nav>
+
+    <div id="panels">
+      <section class="step-panel" data-step="source">
+        <div class="step-intro"><h2>What should the tracker look at?</h2>
+          <p class="muted">A simulated scene gives full control and ground truth. A video file bypasses the pan-tilt camera, as in Benchmark 2.</p></div>
+        <div class="choice-row" id="sourceChoice">
+          <button class="choice" type="button" data-source="simulator" aria-pressed="true"><strong>Simulated scene</strong>
+            <span>Virtual camera, moving beacon, configurable noise and weather. Scored against true beacon position.</span></button>
+          <button class="choice" type="button" data-source="video" aria-pressed="false"><strong>Video file</strong>
+            <span>Feed a recorded .mp4 straight into detection and tracking. The camera stays fixed.</span></button>
+        </div>
+
+        <div id="simOnly" class="group" style="margin-top:26px">
+          <h3>Start from a scenario</h3>
+          <p class="group-note">Fills in the other steps. You can still adjust anything after.</p>
+          <div class="presets" id="presets"></div>
+        </div>
+
+        <div id="videoOnly" class="group" style="margin-top:26px" hidden>
+          <h3>Video file</h3>
+          <label class="drop" id="drop">
+            <input type="file" id="videoFile" accept="video/mp4,.mp4" hidden>
+            <strong id="dropTitle">Drop an .mp4 here or choose a file</strong>
+            <span class="muted small" id="dropSub">30 fps recordings with a moving beacon spot</span>
+          </label>
+        </div>
+
+        <div class="group" style="margin-top:8px">
+          <label class="toggle"><span><span class="toggle-title">Run in real time</span><br>
+            <span class="toggle-help">Deliver frames at the camera rate, as real hardware would. Turn off to process as fast as the computer allows.</span></span>
+            <input type="checkbox" id="realtime" checked></label>
+        </div>
+      </section>
+
+      <section class="step-panel" data-step="camera">
+        <div class="step-intro"><h2>Scene and camera</h2>
+          <p class="muted">The world the camera looks into, the sensor itself, and how fast the gimbal can turn.</p></div>
+        <div id="f-camera"></div>
+      </section>
+
+      <section class="step-panel" data-step="target">
+        <div class="step-intro"><h2>Beacon and its motion</h2>
+          <p class="muted">What the tracker has to find, and the path it follows across the scene.</p></div>
+        <div id="f-target"></div>
+      </section>
+
+      <section class="step-panel" data-step="disturb">
+        <div class="step-intro"><h2>Disturbances</h2>
+          <p class="muted">Turn on anything that should degrade the camera feed. They stack, in the order listed.</p></div>
+        <div id="f-disturb"></div>
+      </section>
+
+      <section class="step-panel" data-step="tracking">
+        <div class="step-intro"><h2>Tracking and control</h2>
+          <p class="muted">The defaults are tuned to meet the spec. Change these only to study how the tracker responds.</p></div>
+        <div id="f-tracking"></div>
+      </section>
+
+      <div class="step-nav">
+        <button class="btn" id="backBtn" type="button">Back</button>
+        <button class="btn primary" id="nextBtn" type="button">Next</button>
+      </div>
+    </div>
+
+    <aside class="preview-col">
+      <div class="panel" id="camPanel">
+        <div class="panel-head"><h3>Camera view at start</h3><span class="chip" id="previewState">Rendering</span></div>
+        <div class="cam-frame"><img id="camImg" alt="Rendered first frame of the virtual camera with the current disturbances">
+          <canvas class="zoom" id="camZoom" aria-hidden="true"></canvas></div>
+        <p class="caption">One real frame from the simulator, centred on the beacon, with your disturbances applied. Inset: centre at 4× zoom.</p>
+      </div>
+      <div class="panel" id="mapPanel">
+        <div class="panel-head"><h3>Beacon path</h3><span class="faint small">first 60 s</span></div>
+        <canvas class="map" id="map"></canvas>
+        <div class="legend" style="margin-top:10px"><span><i style="background:#ffb53d"></i>Beacon path</span><span><i style="background:transparent;border:1.5px solid #37d8a8"></i>Camera view at start</span></div>
+      </div>
+      <div class="panel" id="summaryPanel">
+        <h3 style="margin-bottom:10px">Run summary</h3>
+        <dl class="summary" id="summary"></dl>
+      </div>
+    </aside>
+  </div>
+</main>
+</div>
+
+<script type="module">
+import { api, toast, MOTION_NAMES } from "/static/app.js";
+
+const STEPS = [
+  { id: "source", title: "Source", desc: "Scene or video" },
+  { id: "camera", title: "Scene and camera", desc: "Sensor and gimbal", groups: ["Scene", "Camera", "PTZ"] },
+  { id: "target", title: "Beacon", desc: "Shape and motion", groups: ["Target", "Scenario Preset"] },
+  { id: "disturb", title: "Disturbances", desc: "Noise and weather", groups: ["Noise", "Jitter", "Atmosphere", "Turbulence", "Platform Motion"] },
+  { id: "tracking", title: "Tracking", desc: "Advanced tuning", groups: ["Detector", "IMM Tracker", "PID Control", "Link Budget"] },
+];
+const MOTION_GROUP = {
+  straight_line: "Motion: Straight Line", circular: "Motion: Circular", figure8: "Motion: Figure-8",
+  random: "Motion: Random Walk", spiral: "Motion: Spiral", sinusoidal: "Motion: Sinusoidal", user_defined: "Motion: User-defined",
+};
+const GROUP_TITLES = {
+  PTZ: "Pan-tilt gimbal", "Scenario Preset": "Orbital scenario", "Platform Motion": "Platform motion",
+  "IMM Tracker": "Motion filter (IMM)", "PID Control": "Pointing loop (PID)", "Link Budget": "Link budget reporting",
+  Detector: "Beacon detector",
+};
+const GROUP_NOTES = {
+  "Scenario Preset": "Replaces the motion above with a path derived from real orbital mechanics.",
+  "Link Budget": "Only changes how pointing error is reported in microradians and dB, not how tracking works.",
+  Turbulence: "Heavy to compute: expect lower frame rates while it is on.",
+};
+
+const PRESETS = [
+  { id: "default", title: "Spec defaults", desc: "Straight line, clear sky, no noise", values: {} },
+  { id: "noise", title: "Heavy sensor noise", desc: "Salt and pepper 10%, Gaussian σ 20, Poisson", values: {
+    "disturbances/noise/salt_pepper/enabled": true, "disturbances/noise/salt_pepper/amount": 0.10,
+    "disturbances/noise/gaussian/enabled": true, "disturbances/noise/gaussian/sigma": 20,
+    "disturbances/noise/poisson/enabled": true } },
+  { id: "weather", title: "Fog and shake", desc: "Fog, camera jitter ±10 px, circular path", values: {
+    "disturbances/atmosphere/mode": "fog", "disturbances/jitter/enabled": true, "disturbances/jitter/max_px": 10,
+    "target/motion": "circular" } },
+  { id: "platform", title: "Moving platform", desc: "Figure of 8 beacon, circular platform drift", values: {
+    "target/motion": "figure8", "disturbances/platform_motion/enabled": true,
+    "disturbances/platform_motion/mode": "circular", "disturbances/platform_motion/max_px_frame": 5 } },
+  { id: "night", title: "Low light, random walk", desc: "Dim scene, erratic beacon, Gaussian σ 10", values: {
+    "disturbances/atmosphere/mode": "low_light", "target/motion": "random",
+    "disturbances/noise/gaussian/enabled": true, "disturbances/noise/gaussian/sigma": 10 } },
+  { id: "leo", title: "LEO crosslink", desc: "Orbit-derived motion between two satellites", values: {
+    "scenario_preset": "leo_leo_crosslink" } },
+];
+
+const STORE_KEY = "fsoc-setup-v2";
+let schema, byKey = {}, values = {}, defaults = {};
+let source = "simulator", videoPath = null, videoName = null, current = 0, activePreset = "default";
+
+const keyOf = p => p.path.join("/");
+const qs = new URLSearchParams(location.search);
+
+// ---------- persistence ----------
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ values, source, realtime: realtimeEl.checked, activePreset })); } catch {}
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+    if (!s) return;
+    for (const k in s.values) if (k in byKey) values[k] = s.values[k];
+    if (s.source) source = s.source;
+    if (typeof s.realtime === "boolean") realtimeEl.checked = s.realtime;
+    activePreset = s.activePreset || "default";
+  } catch {}
+}
+
+// ---------- field widgets ----------
+function fieldFor(p) {
+  const k = keyOf(p);
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const id = "p-" + k.replaceAll("/", "-");
+  const unit = p.unit ? ` ${p.unit.replace("deg", "°").replace("urad", "µrad")}` : "";
+  if (p.kind === "bool") {
+    wrap.innerHTML = `<label class="toggle" for="${id}"><span>${p.label}${p.help ? `<br><span class="toggle-help">${p.help}</span>` : ""}</span>
+      <input type="checkbox" id="${id}"></label>`;
+    const cb = wrap.querySelector("input");
+    cb.checked = !!values[k];
+    cb.addEventListener("change", () => set(k, cb.checked));
+  } else if (p.kind === "enum") {
+    wrap.innerHTML = `<label class="field-label" for="${id}"><span>${p.label}</span></label><select id="${id}"></select>
+      ${p.help ? `<span class="field-help">${p.help}</span>` : ""}`;
+    const sel = wrap.querySelector("select");
+    for (const [v, d] of p.options) sel.add(new Option(d, v, false, v === values[k]));
+    sel.addEventListener("change", () => set(k, sel.value));
+  } else if (p.kind === "text") {
+    wrap.innerHTML = `<label class="field-label" for="${id}"><span>${p.label}</span></label><input type="text" id="${id}" spellcheck="false">
+      ${p.help ? `<span class="field-help">${p.help}</span>` : ""}`;
+    const inp = wrap.querySelector("input");
+    inp.value = values[k];
+    inp.addEventListener("change", () => set(k, inp.value));
+  } else {
+    wrap.innerHTML = `<div class="field-label"><label for="${id}">${p.label}</label><span class="val num"></span></div>
+      <div class="range"><input type="range" id="${id}" min="${p.min}" max="${p.max}" step="${p.step || (p.kind === "int" ? 1 : 0.1)}" aria-describedby="${id}-h">
+      <input type="number" min="${p.min}" max="${p.max}" step="${p.step || (p.kind === "int" ? 1 : 0.1)}" aria-label="${p.label} value"></div>
+      ${p.help ? `<span class="field-help" id="${id}-h">${p.help}</span>` : ""}`;
+    const [rng, num] = wrap.querySelectorAll("input");
+    const val = wrap.querySelector(".val");
+    const show = v => { rng.value = v; num.value = v; val.textContent = `${v}${unit}`; };
+    show(values[k]);
+    rng.addEventListener("input", () => { show(rng.value); set(k, +rng.value, true); });
+    rng.addEventListener("change", () => set(k, +rng.value));
+    num.addEventListener("change", () => {
+      let v = Math.min(p.max, Math.max(p.min, +num.value));
+      if (p.kind === "int") v = Math.round(v);
+      show(v); set(k, v);
+    });
+  }
+  return wrap;
+}
+
+function groupBlock(group, params) {
+  const sec = document.createElement("div");
+  sec.className = "group";
+  sec.innerHTML = `<h3>${GROUP_TITLES[group] || group}</h3>${GROUP_NOTES[group] ? `<p class="group-note">${GROUP_NOTES[group]}</p>` : ""}`;
+  // A bool whose path ends in "enabled" gates the params sharing its prefix:
+  // show the switch, reveal its settings only when on.
+  const gates = params.filter(p => p.kind === "bool" && p.path[p.path.length - 1] === "enabled");
+  const gated = new Set();
+  for (const g of gates) {
+    const prefix = g.path.slice(0, -1).join("/");
+    const kids = params.filter(p => p !== g && keyOf(p).startsWith(prefix + "/"));
+    kids.forEach(p => gated.add(p));
+    const block = document.createElement("div");
+    block.className = "sub-block";
+    block.appendChild(fieldFor(g));
+    if (kids.length) {
+      const f = document.createElement("div");
+      f.className = "fields";
+      f.hidden = !values[keyOf(g)];
+      kids.forEach(p => f.appendChild(fieldFor(p)));
+      block.appendChild(f);
+      block.querySelector("input[type=checkbox]").addEventListener("change", e => { f.hidden = !e.target.checked; });
+    }
+    sec.appendChild(block);
+    gated.add(g);
+  }
+  const rest = params.filter(p => !gated.has(p));
+  if (rest.length) {
+    const f = document.createElement("div");
+    f.className = "fields";
+    rest.forEach(p => {
+      const el = fieldFor(p);
+      if (keyOf(p) === "disturbances/atmosphere/strength") {
+        el.dataset.dependsAtmo = "1";
+        el.hidden = values["disturbances/atmosphere/mode"] === "clear";
+      }
+      f.appendChild(el);
+    });
+    sec.appendChild(f);
+  }
+  return sec;
+}
+
+function motionBlock() {
+  const sec = document.createElement("div");
+  sec.className = "group";
+  const m = values["target/motion"];
+  const opts = byKey["target/motion"].options;
+  sec.innerHTML = `<h3>Motion path</h3><div class="seg" role="group" aria-label="Motion type">
+    ${opts.map(([v, d]) => `<button type="button" data-v="${v}" aria-pressed="${v === m}">${d}</button>`).join("")}</div>
+    <div class="fields" style="margin-top:18px" id="motionFields"></div>`;
+  sec.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+    set("target/motion", b.dataset.v);
+    renderSteps(); // swap parameter set
+  }));
+  const f = sec.querySelector("#motionFields");
+  schema.params.filter(p => p.group === MOTION_GROUP[m]).forEach(p => f.appendChild(fieldFor(p)));
+  return sec;
+}
+
+function renderSteps() {
+  const byGroup = {};
+  for (const p of schema.params) (byGroup[p.group] ??= []).push(p);
+  const fill = (id, groups, extra) => {
+    const host = document.getElementById(id);
+    host.innerHTML = "";
+    for (const g of groups) {
+      if (g === "Target") {
+        host.appendChild(groupBlock("Target", byGroup.Target.filter(p => keyOf(p) !== "target/motion")));
+        host.appendChild(motionBlock());
+        continue;
+      }
+      if (byGroup[g]) host.appendChild(groupBlock(g, byGroup[g]));
+    }
+  };
+  for (const s of STEPS) if (s.groups) fill("f-" + s.id, s.groups);
+}
+
+// ---------- state ----------
+let previewTimer;
+function set(k, v, transient = false) {
+  values[k] = v;
+  if (k === "disturbances/atmosphere/mode") {
+    document.querySelectorAll("[data-depends-atmo]").forEach(el => el.hidden = v === "clear");
+  }
+  if (!transient) {
+    activePreset = null;
+    markPreset();
+    save();
+    renderSummary();
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(preview, 250);
+  }
+}
+
+// ---------- stepper ----------
+const stepperEl = document.getElementById("stepper");
+function renderStepper() {
+  stepperEl.innerHTML = STEPS.map((s, i) => {
+    const disabled = source === "video" && i > 0 && s.id !== "tracking";
+    return `<button type="button" data-i="${i}" ${i === current ? 'aria-current="step"' : ""} class="${i < current ? "done" : ""}" ${disabled ? "hidden" : ""}>
+      <span class="n">${i + 1}</span><span><span class="t" style="display:block">${s.title}</span><span class="d">${s.desc}</span></span></button>`;
+  }).join("");
+  stepperEl.querySelectorAll("button").forEach(b => b.addEventListener("click", () => go(+b.dataset.i)));
+}
+function visibleSteps() { return STEPS.map((s, i) => i).filter(i => !(source === "video" && i > 0 && STEPS[i].id !== "tracking")); }
+function go(i) {
+  current = i;
+  document.querySelectorAll(".step-panel").forEach(p => p.classList.toggle("on", p.dataset.step === STEPS[i].id));
+  renderStepper();
+  const vis = visibleSteps(), pos = vis.indexOf(i);
+  document.getElementById("backBtn").disabled = pos === 0;
+  const next = document.getElementById("nextBtn");
+  next.textContent = pos === vis.length - 1 ? "Start run" : `Next: ${STEPS[vis[pos + 1]].title}`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+document.getElementById("backBtn").onclick = () => { const vis = visibleSteps(); go(vis[Math.max(0, vis.indexOf(current) - 1)]); };
+document.getElementById("nextBtn").onclick = () => {
+  const vis = visibleSteps(), pos = vis.indexOf(current);
+  pos === vis.length - 1 ? start() : go(vis[pos + 1]);
+};
+
+// ---------- source ----------
+const realtimeEl = document.getElementById("realtime");
+realtimeEl.addEventListener("change", save);
+function setSource(s) {
+  source = s;
+  document.querySelectorAll("#sourceChoice .choice").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === s));
+  document.getElementById("simOnly").hidden = s !== "simulator";
+  document.getElementById("videoOnly").hidden = s !== "video";
+  document.getElementById("camPanel").hidden = s !== "simulator";
+  document.getElementById("mapPanel").hidden = s !== "simulator";
+  renderStepper(); renderSummary(); save();
+  go(current);
+}
+document.querySelectorAll("#sourceChoice .choice").forEach(b => b.addEventListener("click", () => setSource(b.dataset.source)));
+
+const drop = document.getElementById("drop"), fileEl = document.getElementById("videoFile");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); });
+fileEl.addEventListener("change", () => fileEl.files[0] && upload(fileEl.files[0]));
+async function upload(file) {
+  if (!/\.mp4$/i.test(file.name)) { toast("Choose an .mp4 file.", true); return; }
+  document.getElementById("dropTitle").textContent = `Uploading ${file.name}`;
+  const form = new FormData(); form.append("file", file);
+  try {
+    const d = await api("/api/control/upload_video", { method: "POST", body: form });
+    videoPath = d.path; videoName = d.name;
+    document.getElementById("dropTitle").textContent = file.name;
+    document.getElementById("dropSub").textContent = `${(file.size / 1e6).toFixed(1)} MB uploaded. Choose another to replace it.`;
+    renderSummary();
+  } catch (e) {
+    document.getElementById("dropTitle").textContent = "Upload failed. Try again.";
+    toast(e.message, true);
+  }
+}
+
+// ---------- presets ----------
+function markPreset() {
+  document.querySelectorAll(".preset").forEach(b => b.setAttribute("aria-pressed", b.dataset.id === activePreset));
+}
+function applyPreset(p) {
+  values = { ...defaults, ...p.values };
+  activePreset = p.id;
+  renderSteps(); markPreset(); save(); renderSummary(); preview();
+  toast(`Loaded “${p.title}”.`);
+}
+document.getElementById("presets").innerHTML = PRESETS.map(p =>
+  `<button type="button" class="preset" data-id="${p.id}"><strong>${p.title}</strong><span>${p.desc}</span></button>`).join("");
+document.querySelectorAll(".preset").forEach(b => b.addEventListener("click", () => applyPreset(PRESETS.find(p => p.id === b.dataset.id))));
+document.getElementById("resetBtn").onclick = () => applyPreset(PRESETS[0]);
+
+// ---------- preview ----------
+let previewSeq = 0, lastPreview = null;
+async function preview() {
+  if (source !== "simulator") return;
+  const seq = ++previewSeq;
+  const chip = document.getElementById("previewState");
+  chip.textContent = "Rendering"; chip.className = "chip";
+  try {
+    const d = await api("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ui_values: values }) });
+    if (seq !== previewSeq) return;
+    const camImg = document.getElementById("camImg");
+    camImg.onload = () => {
+      const z = document.getElementById("camZoom"), zc = z.getContext("2d");
+      z.width = 160; z.height = 120; zc.imageSmoothingEnabled = false;
+      const w = camImg.naturalWidth, h = camImg.naturalHeight, cw = w / 4, ch = h / 4;
+      zc.drawImage(camImg, (w - cw) / 2, (h - ch) / 2, cw, ch, 0, 0, 160, 120);
+    };
+    camImg.src = d.image;
+    chip.textContent = "Up to date"; chip.className = "chip pass";
+    lastPreview = d; drawMap();
+  } catch (e) {
+    if (seq !== previewSeq) return;
+    chip.textContent = "Can't render"; chip.className = "chip fail";
+    toast(e.message, true);
+  }
+}
+function drawMap() {
+  const d = lastPreview; if (!d) return;
+  const c = document.getElementById("map"), ctx = c.getContext("2d");
+  const W = c.clientWidth, dpr = devicePixelRatio || 1;
+  c.width = W * dpr; c.height = W * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const [sw, sh] = d.screen, pad = 10, k = (W - pad * 2) / Math.max(sw, sh);
+  const X = x => pad + x * k, Y = y => pad + y * k;
+  ctx.clearRect(0, 0, W, W);
+  ctx.strokeStyle = "rgba(143,164,222,0.10)"; ctx.lineWidth = 1;
+  for (let g = 0; g <= 10; g++) {
+    ctx.beginPath(); ctx.moveTo(X(sw * g / 10), Y(0)); ctx.lineTo(X(sw * g / 10), Y(sh)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(X(0), Y(sh * g / 10)); ctx.lineTo(X(sw), Y(sh * g / 10)); ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(143,164,222,0.4)"; ctx.strokeRect(X(0), Y(0), sw * k, sh * k);
+  const [fw, fh] = d.fov_world;
+  ctx.strokeStyle = "#37d8a8"; ctx.lineWidth = 1.5;
+  ctx.strokeRect(X(sw / 2 - fw / 2), Y(sh / 2 - fh / 2), fw * k, fh * k);
+  d.paths.forEach((path, i) => {
+    ctx.strokeStyle = i === 0 ? "rgba(255,181,61,0.85)" : "rgba(255,181,61,0.4)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); path.forEach(([x, y], j) => j ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.stroke();
+    const [x0, y0] = path[0];
+    ctx.fillStyle = "#ffb53d"; ctx.fillRect(X(x0) - 3, Y(y0) - 3, 6, 6);
+  });
+  ctx.fillStyle = "#6c7aa3"; ctx.font = "11px Archivo, system-ui";
+  ctx.fillText(`${sw} × ${sh} px screen`, pad + 4, W - pad - 4);
+}
+addEventListener("resize", drawMap);
+
+// ---------- summary ----------
+function renderSummary() {
+  const rows = [];
+  if (source === "video") {
+    rows.push(["Source", videoName || "No file yet"]);
+  } else {
+    const preset = values["scenario_preset"];
+    rows.push(["Source", "Simulated scene"]);
+    rows.push(["Motion", preset && preset !== "none" ? byKey["scenario_preset"].options.find(o => o[0] === preset)[1] : MOTION_NAMES[values["target/motion"]]]);
+    rows.push(["Beacon", `${values["target/size_px/0"]} × ${values["target/size_px/1"]} px ${values["target/shape"]}, ${values["target/num_targets"]} target${values["target/num_targets"] > 1 ? "s" : ""}`]);
+    rows.push(["Camera", `${values["camera/resolution/0"]} × ${values["camera/resolution/1"]} px, ${values["camera/fov_deg/0"]}° × ${values["camera/fov_deg/1"]}°, ${values["camera/update_rate_hz"]} Hz`]);
+    const dist = [];
+    if (values["disturbances/noise/salt_pepper/enabled"]) dist.push("salt and pepper");
+    if (values["disturbances/noise/gaussian/enabled"]) dist.push("Gaussian");
+    if (values["disturbances/noise/poisson/enabled"]) dist.push("Poisson");
+    if (values["disturbances/jitter/enabled"]) dist.push("jitter");
+    if (values["disturbances/atmosphere/mode"] !== "clear") dist.push(values["disturbances/atmosphere/mode"].replace("_", " "));
+    if (values["disturbances/turbulence/enabled"]) dist.push("turbulence");
+    if (values["disturbances/platform_motion/enabled"]) dist.push("platform drift");
+    rows.push(["Disturbances", dist.length ? dist.join(", ") : "None"]);
+  }
+  rows.push(["Timing", realtimeEl.checked ? "Real time" : "As fast as possible"]);
+  document.getElementById("summary").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
+}
+realtimeEl.addEventListener("change", renderSummary);
+
+// ---------- start ----------
+async function start() {
+  if (source === "video" && !videoPath) { toast("Upload a video file first.", true); go(0); return; }
+  const btns = [document.getElementById("startTop"), document.getElementById("nextBtn")];
+  btns.forEach(b => b.disabled = true);
+  try {
+    await api("/api/control/start", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ui_values: values, video_path: source === "video" ? videoPath : null, realtime: realtimeEl.checked }) });
+    location.href = "/live";
+  } catch (e) {
+    btns.forEach(b => b.disabled = false);
+    if (/already active/.test(e.message)) toast("A run is already in progress. Stop it on the Live page first.", true);
+    else toast(e.message, true);
+  }
+}
+document.getElementById("startTop").onclick = start;
+
+// ---------- boot ----------
+(async () => {
+  schema = await api("/api/config/schema");
+  for (const p of schema.params) { byKey[keyOf(p)] = p; defaults[keyOf(p)] = p.default; }
+  values = { ...defaults };
+  load();
+  if (qs.get("source") === "video") source = "video";
+  renderSteps();
+  markPreset();
+  setSource(source);
+  const want = STEPS.findIndex(s => s.id === qs.get("step"));
+  go(want > 0 ? want : 0);
+  preview();
+})();
+</script>
+</body>
+</html>

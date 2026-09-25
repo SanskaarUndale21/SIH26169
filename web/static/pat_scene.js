@@ -15,7 +15,7 @@ import { OrbitControls } from "/static/OrbitControls.js";
 
 export const DISPLAY_RANGE = 400;
 export const LOCK_COLORS = {
-  searching: 0xef4444, acquiring: 0xeab308, reacquiring: 0xeab308, locked: 0x22c55e,
+  searching: 0xff6e57, acquiring: 0x8fb4ff, reacquiring: 0x8fb4ff, locked: 0x37d8a8,
 };
 
 export function anglesToPoint(panDeg, tiltDeg, range = DISPLAY_RANGE) {
@@ -29,7 +29,7 @@ export function createPATScene(holderElement) {
   holderElement.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0b0f);
+  scene.background = new THREE.Color(0x050a18);
   const camera3 = new THREE.PerspectiveCamera(
     55, holderElement.clientWidth / holderElement.clientHeight, 1, 5000);
   camera3.position.set(500, 350, -500);
@@ -52,7 +52,7 @@ export function createPATScene(holderElement) {
   // a non-technical viewer, with nothing on screen saying which axis is
   // which -- removed rather than explained, since it added no
   // information the grid + orbit controls don't already convey.
-  const grid = new THREE.GridHelper(800, 16, 0x334155, 0x1e293b);
+  const grid = new THREE.GridHelper(800, 16, 0x2b3a63, 0x19244a);
   grid.rotation.x = Math.PI / 2;
   grid.position.z = DISPLAY_RANGE;
   scene.add(grid);
@@ -61,17 +61,17 @@ export function createPATScene(holderElement) {
   coneGeo.rotateX(Math.PI / 2);
   coneGeo.translate(0, 0, DISPLAY_RANGE * 0.45);
   const coneMat = new THREE.MeshStandardMaterial({
-    color: 0xd98a4f, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
+    color: 0x37d8a8, transparent: true, opacity: 0.35, side: THREE.DoubleSide,
   });
   const coneMesh = new THREE.Mesh(coneGeo, coneMat);
   scene.add(coneMesh);
 
   const gtMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(9, 16, 16), new THREE.MeshStandardMaterial({ color: 0x4ade80 }));
+    new THREE.SphereGeometry(9, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffb53d, emissive: 0x6b4000 }));
   scene.add(gtMesh);
 
   const beliefMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(7, 16, 16), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+    new THREE.SphereGeometry(7, 16, 16), new THREE.MeshStandardMaterial({ color: 0xe8ecf7 }));
   scene.add(beliefMesh);
 
   const MAX_TRAIL = 400;
@@ -84,8 +84,8 @@ export function createPATScene(holderElement) {
     scene.add(line);
     return line;
   }
-  const targetTrail = makeTrail(0x4ade80);
-  const camTrail = makeTrail(0xd98a4f);
+  const targetTrail = makeTrail(0xffb53d);
+  const camTrail = makeTrail(0x8fb4ff);
 
   function pushTrail(line, point) {
     const pts = line.userData.points;
@@ -142,6 +142,7 @@ export function createPATScene(holderElement) {
   }
 
   function onResize() {
+    if (!holderElement.clientWidth || !holderElement.clientHeight) return;
     renderer.setSize(holderElement.clientWidth, holderElement.clientHeight);
     camera3.aspect = holderElement.clientWidth / holderElement.clientHeight;
     camera3.updateProjectionMatrix();
@@ -157,5 +158,5 @@ export function createPATScene(holderElement) {
     tick();
   }
 
-  return { applyFrame, resetTrails, startRenderLoop, renderer, scene, camera3 };
+  return { applyFrame, resetTrails, startRenderLoop, resize: onResize, renderer, scene, camera3 };
 }

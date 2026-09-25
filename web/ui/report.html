@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Report</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .crumbs { font-size: 13.5px; color: var(--faint); margin-bottom: 10px; }
+  .crumbs a { color: var(--dim); text-decoration: none; }
+  .crumbs a:hover { color: var(--text); }
+  .head-meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; color: var(--dim); }
+  .block { margin-top: 28px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .chart { width: 100%; height: 190px; }
+  .chart.sm { height: 140px; }
+  .ribbon { width: 100%; height: 14px; border-radius: 4px; margin-top: 8px; background: var(--ink); }
+  .replay { position: relative; aspect-ratio: 16 / 10; border-radius: var(--r-md); overflow: hidden; background: #050a18; }
+  .replay-bar { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  .replay-bar input { flex: 1; }
+  .replay-bar .num { min-width: 120px; text-align: right; font-size: 13px; color: var(--dim); }
+  .kv { display: grid; grid-template-columns: 1fr auto; font-size: 14px; }
+  .kv > * { padding: 9px 0; border-bottom: 1px solid var(--rule-soft); }
+  .kv dt { color: var(--dim); }
+  .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .downloads { display: flex; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+  @media print {
+    .sidebar, .downloads, .replay-panel, .crumbs { display: none !important; }
+    .shell { display: block; }
+    body { background: #fff; color: #111; }
+    .panel, .readout { background: #fff !important; border-color: #ccc !important; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div class="crumbs"><a href="/runs">Runs</a> / <span id="crumb">__RUN_NAME__</span></div>
+  <div class="page-head">
+    <div>
+      <h1 class="page-title" id="title">Run report</h1>
+      <div class="head-meta" id="meta"></div>
+    </div>
+    <div class="downloads" id="downloads"></div>
+  </div>
+
+  <div id="missing" hidden class="panel empty"><h3>This run can't be found</h3><p>It may have been deleted from the logs folder.</p><a class="btn" href="/runs">Back to runs</a></div>
+
+  <div id="content" hidden>
+    <div class="readouts" id="readouts"></div>
+
+    <div class="block two">
+      <div class="panel">
+        <div class="panel-head"><h3 id="errTitle">Tracking error over the run</h3><span class="small faint" id="errNote"></span></div>
+        <canvas class="chart" id="errChart"></canvas>
+        <canvas class="ribbon" id="ribbon"></canvas>
+        <div class="legend" style="margin-top:10px">
+          <span><i style="background:#37d8a8"></i>Locked</span><span><i style="background:#8fb4ff"></i>Acquiring or re-acquiring</span><span><i style="background:#ff6e57"></i>Searching</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:8px">Performance log</h3>
+        <dl class="kv" id="log"></dl>
+      </div>
+    </div>
+
+    <div class="block two" id="pointingBlock">
+      <div class="panel">
+        <div class="panel-head"><h3>Camera pointing</h3><span class="legend"><span><i style="background:#ffb53d"></i>Pan</span><span><i style="background:#8fb4ff"></i>Tilt</span></span></div>
+        <canvas class="chart sm" id="panChart"></canvas>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:8px">Scenario</h3>
+        <dl class="kv" id="scenario"></dl>
+      </div>
+    </div>
+
+    <div class="block panel replay-panel" id="replayPanel">
+      <div class="panel-head"><h3>3D replay</h3><span class="small faint">Recorded pan, tilt and beacon position, frame by frame. Drag to orbit.</span></div>
+      <div class="replay" id="replay"></div>
+      <div class="replay-bar">
+        <button class="btn" id="playBtn" type="button">Play</button>
+        <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Replay position">
+        <span class="num" id="frameLabel"></span>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+<script type="importmap">{ "imports": { "three": "/static/three.module.min.js" } }</script>
+<script type="module">
+import { SPEC, readoutHTML, fmt, api, runDate, describeRun, overallVerdict, drawLine, drawLockRibbon, LOCK_NAMES, MOTION_NAMES } from "/static/app.js";
+const NAME = "__RUN_NAME__";
+const $ = id => document.getElementById(id);
+let frames = [], run;
+
+const LOG_FIELDS = [
+  ["simulation_duration_sec", "Simulation duration", "s"], ["fps", "Frames per second", ""],
+  ["processing_time_per_frame_ms", "Processing time per frame", "ms"], ["acquisition_time_sec", "Acquisition time", "s"],
+  ["avg_tracking_error_px", "Average tracking error", "px"], ["max_tracking_error_px", "Maximum tracking error", "px"],
+  ["rmse_px", "RMS tracking error", "px"], ["lock_retention_rate", "Lock retention", "%"],
+  ["re_acquisition_count", "Re-acquisitions", "count"], ["avg_angular_error_urad", "Average pointing error", "µrad"],
+  ["avg_pointing_loss_db", "Average pointing loss", "dB"], ["handoff_ready_rate", "Ready for fine stage", "%"],
+  ["time_to_handoff_ready_sec", "Time to fine-stage handoff", "s"],
+];
+
+function errorOf(r) {
+  if (!r.ground_truth_px || !r.ground_truth_px.length || !r.predicted_px || r.lock_state === "searching") return null;
+  const [px, py] = r.predicted_px;
+  return Math.min(...r.ground_truth_px.map(([gx, gy]) => Math.hypot(px - gx, py - gy)));
+}
+
+function drawCharts() {
+  if (!frames.length) return;
+  const t = frames.map(f => f.timestamp);
+  const hasTruth = frames.some(f => f.ground_truth_px && f.ground_truth_px.length);
+  if (hasTruth) {
+    drawLine($("errChart"), t, frames.map(errorOf), { threshold: 10, thresholdLabel: "10 px limit", yMaxFloor: 12 });
+  } else {
+    $("errTitle").textContent = "Detection confidence over the run";
+    $("errNote").textContent = "no ground truth for video input";
+    drawLine($("errChart"), t, frames.map(f => f.confidence), { color: "#8fb4ff" });
+  }
+  drawLockRibbon($("ribbon"), t, frames.map(f => f.lock_state));
+  if (frames[0].cam_pan_deg != null) {
+    const c = $("panChart");
+    drawLine(c, t, frames.map(f => f.cam_pan_deg), { color: "#ffb53d", yMin: Math.min(...frames.map(f => Math.min(f.cam_pan_deg, f.cam_tilt_deg))) , yMaxFloor: 0.5 });
+    // overlay tilt on same canvas scale by drawing a second pass
+    overlayTilt(c, t);
+  } else {
+    $("pointingBlock").querySelector(".panel").innerHTML = `<h3>Camera pointing</h3><p class="muted small">Video input keeps the camera fixed, so there is no pan or tilt to plot.</p>`;
+  }
+}
+function overlayTilt(canvas, t) {
+  // redraw both series on a shared scale
+  const pans = frames.map(f => f.cam_pan_deg), tilts = frames.map(f => f.cam_tilt_deg);
+  const all = pans.concat(tilts);
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const ctx = canvas.getContext("2d"), w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+  const padL = 40, padB = 20, padT = 8, padR = 8, span = Math.max(0.5, hi - lo);
+  const y0 = lo - span * 0.1, y1 = hi + span * 0.1;
+  const sx = x => padL + (x - t[0]) / Math.max(1e-9, t[t.length - 1] - t[0]) * (w - padL - padR);
+  const sy = y => padT + (1 - (y - y0) / (y1 - y0)) * (h - padT - padB);
+  ctx.font = "11px Archivo, system-ui"; ctx.fillStyle = "#6c7aa3"; ctx.strokeStyle = "rgba(143,164,222,0.12)";
+  for (let i = 0; i <= 4; i++) { const v = y0 + (y1 - y0) * i / 4; ctx.beginPath(); ctx.moveTo(padL, sy(v)); ctx.lineTo(w - padR, sy(v)); ctx.stroke(); ctx.fillText(`${v.toFixed(1)}°`, 2, sy(v) + 4); }
+  for (const [ys, col] of [[pans, "#ffb53d"], [tilts, "#8fb4ff"]]) {
+    ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.beginPath();
+    ys.forEach((y, i) => i ? ctx.lineTo(sx(t[i]), sy(y)) : ctx.moveTo(sx(t[i]), sy(y))); ctx.stroke();
+  }
+}
+addEventListener("resize", drawCharts);
+
+function renderLog(m) {
+  $("log").innerHTML = LOG_FIELDS.map(([k, label, unit]) => {
+    let v = m[k];
+    if (v == null) return `<dt>${label}</dt><dd class="faint">–</dd>`;
+    if (unit === "%") v = `${fmt(v * 100, 1)}%`;
+    else if (unit === "count") v = String(v);
+    else v = `${fmt(v)}${unit ? " " + unit : ""}`;
+    return `<dt>${label}</dt><dd>${v}</dd>`;
+  }).join("") + (m.re_acquisition_times_sec && m.re_acquisition_times_sec.length
+    ? `<dt>Re-acquisition times</dt><dd>${m.re_acquisition_times_sec.map(x => fmt(x)).join(", ")} s</dd>` : "");
+}
+
+function renderScenario(d) {
+  const c = d.config, info = d.info;
+  if (!c) { $("scenario").innerHTML = `<dt>Settings</dt><dd class="faint">Not recorded for this run</dd>`; return; }
+  if (info && info.mode === "video") {
+    $("scenario").innerHTML = `<dt>Input</dt><dd>${info.video_name}</dd><dt>Timing</dt><dd>${info.realtime ? "Real time" : "Fast"}</dd>`; return;
+  }
+  const dist = c.disturbances, n = dist.noise, list = [];
+  if (n.salt_pepper.enabled) list.push(`salt and pepper ${Math.round(n.salt_pepper.amount * 100)}%`);
+  if (n.gaussian.enabled) list.push(`Gaussian σ ${n.gaussian.sigma}`);
+  if (n.poisson.enabled) list.push("Poisson");
+  if (dist.jitter.enabled) list.push(`jitter ±${dist.jitter.max_px} px`);
+  if (dist.atmosphere.mode !== "clear") list.push(dist.atmosphere.mode.replace("_", " "));
+  if (dist.turbulence.enabled) list.push("turbulence");
+  if (dist.platform_motion.enabled) list.push(`${dist.platform_motion.mode} platform drift`);
+  const rows = [
+    ["Motion", c.scenario_preset ? describeRun(info) : MOTION_NAMES[c.target.motion]],
+    ["Beacon", `${c.target.size_px[0]} × ${c.target.size_px[1]} px ${c.target.shape}, ${c.target.num_targets} target(s)`],
+    ["Screen", `${c.screen.width} × ${c.screen.height} px`],
+    ["Camera", `${c.camera.resolution[0]} × ${c.camera.resolution[1]} px, ${c.camera.fov_deg[0]}° × ${c.camera.fov_deg[1]}°, ${c.camera.update_rate_hz} Hz`],
+    ["Gimbal limits", `${c.ptz.max_pan_speed_deg_s}°/s pan, ${c.ptz.max_tilt_speed_deg_s}°/s tilt`],
+    ["Disturbances", list.length ? list.join(", ") : "None"],
+    ["Timing", info && info.realtime === false ? "As fast as possible" : "Real time"],
+  ];
+  $("scenario").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
+}
+
+async function setupReplay() {
+  const usable = frames.filter(f => f.cam_pan_deg != null);
+  if (!usable.length) { $("replayPanel").hidden = true; return; }
+  const { createPATScene } = await import("/static/pat_scene.js");
+  const pat = createPATScene($("replay"));
+  pat.startRenderLoop();
+  const scrub = $("scrub"); scrub.max = usable.length - 1;
+  let idx = 0, playing = false, last = 0;
+  const show = i => {
+    idx = i; scrub.value = i; const r = usable[i]; pat.applyFrame(r);
+    $("frameLabel").textContent = `${fmt(r.timestamp, 1)} s, ${LOCK_NAMES[r.lock_state]}`;
+  };
+  // pre-fill trails up to the start so the scene isn't empty
+  show(0);
+  scrub.addEventListener("input", () => { playing = false; $("playBtn").textContent = "Play"; pat.resetTrails(); for (let i = Math.max(0, +scrub.value - 300); i <= +scrub.value; i++) pat.applyFrame(usable[i]); show(+scrub.value); });
+  $("playBtn").addEventListener("click", () => {
+    playing = !playing; $("playBtn").textContent = playing ? "Pause" : "Play";
+    if (playing && idx >= usable.length - 1) { pat.resetTrails(); idx = 0; }
+  });
+  (function loop(now) {
+    requestAnimationFrame(loop);
+    if (playing && now - last > 33) { last = now; if (idx < usable.length - 1) show(idx + 1); else { playing = false; $("playBtn").textContent = "Replay"; } }
+  })(0);
+}
+
+(async () => {
+  try { run = await api(`/api/runs/${encodeURIComponent(NAME)}`); }
+  catch { $("missing").hidden = false; $("title").textContent = "Run not found"; return; }
+  const m = run.metrics, v = overallVerdict(m);
+  document.title = `Run Report ${runDate(NAME)}`;
+  $("title").textContent = runDate(NAME);
+  $("meta").innerHTML = `<span>${describeRun(run.info)}</span><span class="chip ${v}">${v === "pass" ? "Meets every spec target" : "Misses at least one spec target"}</span>`;
+  const enc = encodeURIComponent(NAME);
+  $("downloads").innerHTML = `
+    <a class="btn" href="/api/runs/${enc}/download/json">Performance log (JSON)</a>
+    <a class="btn" href="/api/runs/${enc}/download/csv">Performance log (CSV)</a>
+    ${run.has_frames ? `<a class="btn" href="/api/runs/${enc}/centroids.csv">Centroid log (CSV)</a>` : ""}
+    <button class="btn quiet" type="button" onclick="print()">Print</button>`;
+  $("readouts").innerHTML = SPEC.map(s => readoutHTML(s, m)).join("");
+  renderLog(m);
+  renderScenario(run);
+  $("content").hidden = false;
+  if (run.has_frames) {
+    frames = await api(`/api/runs/${enc}/frames`);
+    drawCharts();
+    setupReplay();
+  } else {
+    $("errChart").parentElement.innerHTML = `<h3>Tracking error over the run</h3><p class="muted small">This run has no per-frame log, so only the summary is available.</p>`;
+    $("pointingBlock").querySelector(".panel").hidden = true;
+    $("replayPanel").hidden = true;
+  }
+})();
+</script>
+</body>
+</html>

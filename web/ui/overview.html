@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coarse Alignment Console</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 64px); align-items: center; margin-bottom: 56px; }
+  .hero h1 { font-size: clamp(36px, 4.4vw, 64px); }
+  .hero .lede { font-size: 17px; margin-top: 20px; }
+  .hero .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+  .scope { position: relative; aspect-ratio: 1; width: 100%; max-width: 520px; justify-self: end; }
+  .scope canvas { width: 100%; height: 100%; border-radius: 50%; background: #0a1226; box-shadow: 0 0 0 1px var(--rule), 0 30px 80px -30px rgba(0,0,0,.6); }
+  .scope-state { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); }
+  .scope-state .chip { font-size: 13px; padding: 6px 14px; background: var(--deck-2); border: 1px solid var(--rule); }
+  .section { margin-top: 48px; }
+  .section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .steps { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 0; border-top: 1px solid var(--rule); }
+  .step { padding: 20px 22px 4px 0; }
+  .step + .step { padding-left: 22px; border-left: 1px solid var(--rule-soft); }
+  .step .n { font-stretch: 125%; font-weight: 800; font-size: 15px; color: var(--beacon); }
+  .step h3 { font-stretch: 112%; font-size: 17px; margin: 8px 0 6px; }
+  .step p { margin: 0; color: var(--dim); font-size: 14px; }
+  .recent { display: grid; gap: 1px; background: var(--rule-soft); border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--rule-soft); }
+  .recent a { display: grid; grid-template-columns: 1.3fr 1.4fr repeat(3, .8fr) auto; gap: 14px; align-items: center; padding: 14px 20px; background: var(--deck); text-decoration: none; font-size: 14px; }
+  .recent a:hover { background: var(--deck-2); }
+  .latest-meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  @media (max-width: 1100px) { .hero { grid-template-columns: 1fr; } .scope { justify-self: center; max-width: 420px; } .steps { grid-template-columns: 1fr 1fr; } .step:nth-child(3) { border-left: 0; padding-left: 0; } }
+  @media (max-width: 640px) { .steps { grid-template-columns: 1fr; } .step + .step { border-left: 0; padding-left: 0; } .recent a { grid-template-columns: 1fr auto; } .recent a .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <section class="hero">
+    <div>
+      <h1 class="display">Find the beacon.<br>Hold the lock.</h1>
+      <p class="lede">The coarse stage of an optical link's pointing system, built entirely in software.
+        A virtual pan-tilt camera searches a 2000 × 2000 px scene, detects the beacon spot, and keeps it
+        centred through sensor noise, fog and platform shake, so the fine stage can take over.</p>
+      <div class="actions">
+        <a class="btn primary lg" href="/setup">Set up a simulated run</a>
+        <a class="btn lg" href="/setup?source=video">Benchmark a video file</a>
+      </div>
+    </div>
+    <div class="scope">
+      <canvas id="scope" aria-label="Animated example: the camera spirals to search, finds the beacon and locks on"></canvas>
+      <div class="scope-state"><span class="chip searching" id="scope-state">Searching</span></div>
+    </div>
+  </section>
+
+  <section class="section" id="latest">
+    <div class="section-head">
+      <div>
+        <h2>Latest run against the spec</h2>
+        <div class="latest-meta muted small" id="latest-meta">Loading results</div>
+      </div>
+      <a class="btn quiet" id="latest-link" href="/runs" hidden>Open full report</a>
+    </div>
+    <div class="readouts" id="latest-readouts"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>What happens every frame</h2></div>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><h3>Observe</h3>
+        <p>The virtual 640 × 480 camera renders its 4° × 3° view of the scene at 30 Hz, with the selected noise, weather, jitter and drift applied.</p></div>
+      <div class="step"><span class="n">2</span><h3>Acquire</h3>
+        <p>A difference-of-Gaussians detector finds point-like spots above the local noise floor. A spot must persist for several frames before it counts as the beacon.</p></div>
+      <div class="step"><span class="n">3</span><h3>Estimate</h3>
+        <p>An interacting multiple-model filter blends straight, turning and erratic motion models to predict where the beacon is, even between missed detections.</p></div>
+      <div class="step"><span class="n">4</span><h3>Point</h3>
+        <p>A PID loop slews pan and tilt within the 5°/s limits to centre the beacon. If it's lost, a spiral then raster search sweeps until it's found again.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Recent runs</h2><a class="btn quiet" href="/runs">All runs</a></div>
+    <div id="recent" class="recent"></div>
+  </section>
+</main>
+</div>
+
+<script type="module">
+import { SPEC, readoutHTML, overallVerdict, runDate, describeRun, fmt, api } from "/static/app.js";
+
+// ---------- latest + recent ----------
+(async () => {
+  let runs = [];
+  try { runs = await api("/api/runs"); } catch {}
+  const meta = document.getElementById("latest-meta");
+  const box = document.getElementById("latest-readouts");
+  if (!runs.length) {
+    meta.textContent = "No runs recorded yet.";
+    box.outerHTML = `<div class="panel empty"><h3>Nothing measured yet</h3>
+      <p>Start a run and its acquisition time, tracking error and loss rate will be scored here.</p>
+      <a class="btn primary" href="/setup">Set up a run</a></div>`;
+    document.getElementById("recent").outerHTML = "";
+    return;
+  }
+  const r = runs[0];
+  const v = overallVerdict(r.metrics);
+  meta.innerHTML = `<span>${describeRun(r.info)}</span><span class="faint">${runDate(r.name)}</span>
+    <span class="chip ${v}">${v === "pass" ? "Meets spec" : "Misses spec"}</span>`;
+  box.innerHTML = SPEC.map(s => readoutHTML(s, r.metrics)).join("");
+  const link = document.getElementById("latest-link");
+  link.href = `/runs/${encodeURIComponent(r.name)}`; link.hidden = false;
+
+  document.getElementById("recent").innerHTML = runs.slice(0, 5).map(run => {
+    const m = run.metrics, vv = overallVerdict(m);
+    return `<a href="/runs/${encodeURIComponent(run.name)}">
+      <span>${runDate(run.name)}</span>
+      <span class="muted">${describeRun(run.info)}</span>
+      <span class="num hide-sm">${fmt(m.acquisition_time_sec)} s</span>
+      <span class="num hide-sm">${fmt(m.avg_tracking_error_px)} px</span>
+      <span class="num hide-sm">${fmt(m.fps, 0)} FPS</span>
+      <span class="chip ${vv}">${vv === "pass" ? "Pass" : "Fail"}</span></a>`;
+  }).join("");
+})();
+
+// ---------- acquisition sequence ----------
+const canvas = document.getElementById("scope");
+const stateChip = document.getElementById("scope-state");
+const ctx = canvas.getContext("2d");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const VIEW = 170;                         // world units visible across the scope radius
+const stars = Array.from({ length: 340 }, () => [Math.random() * 1400 - 700, Math.random() * 1400 - 700, Math.random()]);
+const COLORS = { searching: "#ff6e57", acquiring: "#8fb4ff", locked: "#37d8a8" };
+const LABEL = { searching: "Searching", acquiring: "Acquiring", locked: "Locked" };
+let S, t, cam, state, acqT, lockedAt, trail;
+
+function reset() { t = 0; cam = { x: 0, y: 0 }; state = "searching"; acqT = 0; lockedAt = null; trail = []; }
+const beacon = tt => ({ x: 210 + 70 * Math.cos(0.45 * tt), y: -150 + 45 * Math.sin(0.9 * tt) });
+
+function resize() {
+  const d = devicePixelRatio || 1; S = canvas.clientWidth;
+  canvas.width = S * d; canvas.height = S * d; ctx.setTransform(d, 0, 0, d, 0, 0);
+}
+
+function step(dt) {
+  t += dt;
+  const b = beacon(t);
+  const dist = Math.hypot(b.x - cam.x, b.y - cam.y);
+  if (state === "searching") {
+    const a = t * 2.4, r = 30 * t;       // outward spiral search
+    const target = { x: r * Math.cos(a), y: r * Math.sin(a) };
+    cam.x += (target.x - cam.x) * 0.2; cam.y += (target.y - cam.y) * 0.2;
+    if (dist < VIEW * 0.72) { state = "acquiring"; acqT = 0; }
+  } else {
+    cam.x += (b.x - cam.x) * (state === "locked" ? 0.14 : 0.07);
+    cam.y += (b.y - cam.y) * (state === "locked" ? 0.14 : 0.07);
+    if (state === "acquiring") { acqT += dt; if (acqT > 0.6) { state = "locked"; lockedAt = t; } }
+  }
+  trail.push({ ...cam }); if (trail.length > 140) trail.shift();
+  if (t > 10.5) reset();
+}
+
+function draw() {
+  const c = S / 2, k = (S / 2) / VIEW;
+  ctx.clearRect(0, 0, S, S);
+  ctx.save(); ctx.beginPath(); ctx.arc(c, c, c, 0, Math.PI * 2); ctx.clip();
+  // sky field moves opposite to camera
+  for (const [x, y, m] of stars) {
+    const X = c + (x - cam.x) * k, Y = c + (y - cam.y) * k;
+    if (X < -2 || X > S + 2 || Y < -2 || Y > S + 2) continue;
+    ctx.fillStyle = `rgba(163,174,205,${0.12 + m * 0.35})`;
+    ctx.fillRect(X, Y, m > 0.85 ? 2 : 1.2, m > 0.85 ? 2 : 1.2);
+  }
+  // search path
+  ctx.strokeStyle = "rgba(255,110,87,0.28)"; ctx.lineWidth = 1.2; ctx.beginPath();
+  trail.forEach((p, i) => { const X = c + (p.x - cam.x) * k, Y = c + (p.y - cam.y) * k; i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  ctx.stroke();
+  // beacon
+  const b = beacon(t);
+  const bx = c + (b.x - cam.x) * k, by = c + (b.y - cam.y) * k, sz = Math.max(7, S * 0.022);
+  const g = ctx.createRadialGradient(bx, by, 0, bx, by, sz * 3.2);
+  g.addColorStop(0, "rgba(255,181,61,0.55)"); g.addColorStop(1, "rgba(255,181,61,0)");
+  ctx.fillStyle = g; ctx.fillRect(bx - sz * 3.2, by - sz * 3.2, sz * 6.4, sz * 6.4);
+  ctx.fillStyle = "#ffb53d"; ctx.fillRect(bx - sz / 2, by - sz / 2, sz, sz);
+  ctx.restore();
+
+  // reticle
+  const col = COLORS[state];
+  ctx.strokeStyle = "rgba(143,164,222,0.22)"; ctx.lineWidth = 1;
+  for (const r of [0.33, 0.66]) { ctx.beginPath(); ctx.arc(c, c, c * r, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(0, c); ctx.lineTo(S, c); ctx.moveTo(c, 0); ctx.lineTo(c, S); ctx.stroke();
+  ctx.strokeStyle = col; ctx.lineWidth = 2;
+  const gap = S * 0.035, arm = S * 0.09;
+  ctx.beginPath();
+  ctx.moveTo(c - gap - arm, c); ctx.lineTo(c - gap, c); ctx.moveTo(c + gap, c); ctx.lineTo(c + gap + arm, c);
+  ctx.moveTo(c, c - gap - arm); ctx.lineTo(c, c - gap); ctx.moveTo(c, c + gap); ctx.lineTo(c, c + gap + arm);
+  ctx.stroke();
+  // lock ring closes in on acquire
+  const ringR = state === "locked" ? S * 0.07 : state === "acquiring" ? S * (0.16 - 0.09 * Math.min(1, acqT / 0.6)) : S * 0.16;
+  ctx.beginPath(); ctx.arc(c, c, ringR, 0, Math.PI * 2);
+  ctx.setLineDash(state === "searching" ? [6, 8] : []); ctx.stroke(); ctx.setLineDash([]);
+  // outer bezel ticks
+  ctx.strokeStyle = "rgba(143,164,222,0.35)";
+  for (let i = 0; i < 72; i++) {
+    const a = i / 72 * Math.PI * 2, r0 = c - (i % 6 === 0 ? 14 : 7);
+    ctx.beginPath(); ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0); ctx.lineTo(c + Math.cos(a) * (c - 2), c + Math.sin(a) * (c - 2)); ctx.stroke();
+  }
+  const text = state === "locked" ? `Locked in ${lockedAt.toFixed(1)} s` : LABEL[state];
+  if (stateChip.textContent !== text) { stateChip.textContent = text; stateChip.className = "chip " + state; }
+}
+
+reset(); resize();
+addEventListener("resize", () => { resize(); draw(); });
+if (reduce) {
+  for (let i = 0; i < 300; i++) step(1 / 60);
+  draw();
+} else {
+  let last = performance.now();
+  (function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    step(dt); draw(); requestAnimationFrame(loop);
+  })(last);
+}
+</script>
+</body>
+</html>

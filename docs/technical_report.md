@@ -64,15 +64,15 @@ per-frame `step()`, so both entry points drive the PTZ identically.
 
 ### 3.1 One parameter schema, two UIs
 
-Every tweakable simulation parameter (63 total: screen size, camera FOV/
-resolution, target shape/size/location, each of the four motion types'
-own speed/radius/period parameters, PTZ speed limits, every disturbance's
+Every tweakable simulation parameter (74 total: screen size, camera FOV/
+resolution, target shape/width/height/location, each of the seven motion
+types' own parameters (including the user-defined waypoint list), PTZ speed limits, every disturbance's
 intensity including structured jitter and physically-derived turbulence,
 detector thresholds, IMM process/measurement noise, PID gains, link
 budget, scenario presets, target count) is declared exactly once in
 `config/param_schema.py` as a `Param(path, label, group, kind, ...)`
-entry. Both the desktop GUI's `gui/config_panel.py` and the web control
-page's `web/control_page.py` build their forms by walking this same list
+entry. Both the desktop GUI's `gui/config_panel.py` and the web
+console's New run page (`web/ui/setup.html`) build their forms by walking this same list
 -- there is no second, hand-maintained parameter list in either UI that
 could silently expose a different knob set or drift out of sync with
 what the engine actually reads. `resolve_ui_values()` /
@@ -98,33 +98,38 @@ uses, to three output panels:
 - `view3d_panel.py`: a live `pyqtgraph.opengl` 3D view of the real PAT
   geometry (Section 3.4).
 
-### 3.3 Web dashboard and live control (`web/`)
+### 3.3 Web console (`web/`)
 
 A second, independent front-end onto the *same* real engine, not a
-reimplementation:
+reimplementation, split into one page per job instead of one crowded
+screen:
 
-- `web/dashboard_server.py` (FastAPI) serves both the results-browsing
-  page (`/`, reads only `logs/*.json` and `*_frames.jsonl`) and the live
-  control page (`/control`).
+- `web/dashboard_server.py` (FastAPI) serves six pages from `web/ui/`:
+  Overview (`/`), New run (`/setup`), Live (`/live`), Runs (`/runs`), a
+  per-run report (`/runs/{name}`) and Spec check (`/spec`). A shared
+  sidebar is injected server-side; `web/static/app.css` and `app.js` hold
+  the design tokens, spec thresholds, formatting and canvas charts every
+  page uses.
 - `web/live_engine.py`'s `LiveEngine` runs a real `TrackingRunner` in a
-  background thread so `/control` can Start/Stop/configure an actual
-  simulation run from the browser -- the identical engine code
-  `gui/main_window.py` drives. Only one run is live per server process
-  at a time (a second start attempt while one is active gets an HTTP 409,
-  verified directly against the running server); this matches "one
-  simulation engine," not two that could disagree.
-- `/api/config/schema` serves `config/param_schema.py`'s parameter list
-  as JSON, so `web/control_page.py`'s JS builds the identical form the
-  desktop GUI shows, from the same source.
-- `/ws/live` streams real per-frame telemetry (the same `FrameRecord`
-  schema as the `.jsonl` replay files, Section 3.4) plus periodic status/
-  metrics as a live run progresses.
-- This is a deliberate scope change from an earlier version of this
-  project, where the web page was kept strictly read-only and imported
-  nothing from `simulator/perception/control` specifically so it could
-  never affect a judged run. That guarantee is explicitly given up now
-  that the product includes a genuine live web engine; `/view/{name}`
-  and `/api/runs/*` (pure log readers) still carry no such coupling.
+  background thread, the identical engine code `gui/main_window.py`
+  drives. It paces frames to the camera rate by default (real-time, like
+  hardware) or runs flat out for benchmarking, keeps the latest camera
+  image plus a world-state snapshot (boresight and true beacon positions
+  on the full screen) for the Live page, and saves the run log whether the
+  run is stopped or ends by itself (a video file finishing). Each run also
+  writes `<name>_config.json` with the exact scenario, so reports can say
+  what was run. Only one run is live per server process; a second start
+  gets HTTP 409.
+- `/api/config/schema` serves `config/param_schema.py` as JSON, so the New
+  run page builds the identical parameter set the desktop GUI shows.
+  `/api/preview` renders one real frame through `SimulatorEngine` for the
+  current settings, so disturbances can be seen before a run starts.
+- `/ws/live` streams per-frame telemetry (the same `FrameRecord` schema
+  as the `.jsonl` replay files, Section 3.4), JPEG camera frames at about
+  12 per second with their matching record and world state, and status.
+- `/api/runs/{name}/centroids.csv` builds the per-frame centroiding log
+  (detected centroid, tracker estimate, truth, centroiding error) that
+  Benchmarks 1 and 2 ask for, from the saved frame trace.
 
 ### 3.4 Real per-frame telemetry and the two 3D views
 
@@ -560,7 +565,7 @@ wording) and is unaffected when this is off.
   scene, with both explicitly declining to render one when a run has no
   real camera-model geometry to plot (Section 3.4).
 - A real live-run web engine (Section 3.3) rather than a static/read-only
-  dashboard: `/control` runs the same `TrackingRunner` the desktop app
+  console: the Live page runs the same `TrackingRunner` the desktop app
   does, in a background thread, with its telemetry streamed live over a
   WebSocket -- verified end-to-end against the running server, not just
   unit-tested in isolation.

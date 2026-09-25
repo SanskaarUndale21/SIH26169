@@ -17,7 +17,7 @@ engine and a real live control loop, not a scripted animation: the same
 ## 2. Live demo order
 
 1. **Open the desktop GUI** (`python main.py`). Point out the sidebar:
-   63 real tunable parameters (scene, camera, target motion, disturbances,
+   74 real tunable parameters (scene, camera, target motion, disturbances,
    detector, IMM tracker, PID, link budget), all read from one shared
    schema (`config/param_schema.py`) so the web UI can never drift out of
    sync with it.
@@ -29,10 +29,14 @@ engine and a real live control loop, not a scripted animation: the same
    jitter + turbulence. Show the tracking-error chart holding under the
    10px line and the FPS chart holding above 20 -- these are the Section
    10 pass/fail thresholds, colour-coded live on the metric cards.
-4. **Switch to the web dashboard** (`python web/dashboard_server.py`,
-   then `/control`). Start a run there instead, to make the point that
-   it's a second independent front-end on the identical engine, not a
-   pre-recorded page -- then open a finished run's 3D replay from `/`.
+4. **Switch to the web console** (`python web/dashboard_server.py`,
+   then `http://127.0.0.1:8420/`). Open **New run**, pick the "Heavy
+   sensor noise" scenario, show the camera preview updating as you add
+   fog, then **Start run**: the Live page streams the real camera feed
+   with the tracker's crosshair on the beacon. Stop and save, then open
+   the report: scorecard, error chart, centroid log CSV, 3D replay. Finish
+   on **Spec check**, which maps every problem-statement line to what the
+   system does.
 5. **If asked "does it handle real video?"** -- switch input source to
    "Load video file", pick a `.mp4`, and run it: same pipeline, no camera
    model/PTZ geometry (so the 3D view honestly shows "unavailable" instead
@@ -76,9 +80,9 @@ engine and a real live control loop, not a scripted animation: the same
 
 ## 4. Fallback plan if something breaks live
 
-- **Camera/GPU issue on the demo machine**: fall back to the web dashboard
+- **Camera/GPU issue on the demo machine**: fall back to the web console
   only (no OpenGL dependency) -- `python web/dashboard_server.py`, open
-  `/control` in any browser.
+  `http://127.0.0.1:8420/setup` in any browser.
 - **A run won't start / errors out**: reset to the default config
   (`config/default_config.yaml` has no disturbances enabled) and retry
   before touching anything else -- narrow down which slider caused it

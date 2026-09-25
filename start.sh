@@ -21,12 +21,12 @@ else
 fi
 
 already_running() {
-    curl -s -o /dev/null -m 1 "http://127.0.0.1:${PORT}/control"
+    curl -s -o /dev/null -m 1 "http://127.0.0.1:${PORT}/"
 }
 
 WEB_PID=""
 if already_running; then
-    echo "Web dashboard already running at http://127.0.0.1:${PORT}/control -- leaving it as is."
+    echo "Web console already running at http://127.0.0.1:${PORT}/ -- leaving it as is."
 else
     echo "Starting web dashboard + live control server on port ${PORT}..."
     "$PYTHON" web/dashboard_server.py >"$WEB_LOG" 2>&1 &
@@ -40,8 +40,7 @@ else
     done
 
     if already_running; then
-        echo "Web dashboard up: http://127.0.0.1:${PORT}/  (results/replay)"
-        echo "                   http://127.0.0.1:${PORT}/control  (live control)"
+        echo "Web console up: http://127.0.0.1:${PORT}/"
     else
         echo "Web dashboard did not come up in time -- check ${WEB_LOG}" >&2
     fi

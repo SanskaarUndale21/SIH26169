@@ -32,7 +32,7 @@ The desktop window has three panels:
 - **Left**: configuration panel -- tabbed, one tab per parameter group
   (Scene, Camera, Target, one tab per motion type, PTZ, Noise, Jitter,
   Atmosphere, Turbulence, Platform Motion, Link Budget, Scenario Preset,
-  Detector, IMM Tracker, PID Control). Every one of the 63 tweakable
+  Detector, IMM Tracker, PID Control). Every one of the 74 tweakable
   simulation parameters has a slider+spinbox (numeric), checkbox (bool),
   or dropdown (enum) here -- see Section 3.
 - **Centre**: live video feed with detection/prediction overlay, and
@@ -41,11 +41,10 @@ The desktop window has three panels:
   plots plus colour-coded metric cards) and **3D View** (a live OpenGL
   rendering of the actual pan/tilt geometry -- see Section 6).
 
-The web dashboard (`http://127.0.0.1:8420/`, Section 8) is a second,
+The web console (`http://127.0.0.1:8420/`, Section 8) is a second,
 independent front-end onto the same real engine, reachable from a
-browser: results browsing + 3D replay at `/`, and a full live-control
-page (identical parameter set, Start/Stop, live 3D view + charts over a
-WebSocket) at `/control`.
+browser and split into separate pages: Overview, New run, Live, Runs
+(with a report per run) and Spec check.
 
 ## 3. Parameter configuration guide
 
@@ -55,24 +54,34 @@ and missing from the other. Groups, by tab:
 
 - **Scene**: screen width/height (world canvas the simulator renders on).
 - **Camera**: resolution, horizontal/vertical FOV, update rate.
-- **Target**: number of targets, shape, size, initial location, motion
-  type (straight line / circular / figure-8 / random walk / spiral).
+- **Target**: number of targets, shape, width and height (set
+  independently, 5-20 px each), initial location, motion type (straight
+  line / circular / figure-8 / random walk, plus the optional spiral /
+  sinusoidal / user-defined path).
 - **Motion: \<type\>**: each motion type's own parameters (speed/heading
   for straight line, radius/period for circular, amplitudes/period for
-  figure-8, speed/heading-std for random walk) -- all four sets are kept
+  figure-8, speed/heading-std for random walk, start radius/growth/period
+  for spiral, speed/heading/side amplitude/period for sinusoidal, and a
+  waypoint list plus speed for the user-defined path) -- all sets are kept
   live regardless of which motion type is currently selected, so you can
   tune one and switch to it later without losing the values.
+  User-defined waypoints are written as `dx,dy; dx,dy; ...`, offsets in
+  world pixels from the spawn point, visited in order and then looped.
 - **PTZ**: max pan/tilt slew speed, update interval.
 - **Noise**: salt & pepper (enable + amount), Gaussian (enable + sigma),
   Poisson shot noise (enable).
 - **Jitter**: enable, max pixel amplitude, structured (resonant)
   jitter toggle + its resonance frequency.
-- **Atmosphere**: clear / haze / fog / rain / low-light preset.
+- **Atmosphere**: clear / haze / fog / rain / low-light preset, plus a
+  severity control (0 = no effect, 1 = preset, 2 = double) that scales
+  the contrast and brightness reduction.
 - **Turbulence**: enable, "derive r0 from real physics" toggle (Hufnagel-
   Valley Cn² integration) vs. manual Fried parameter, wavelength,
   path altitude, zenith angle.
 - **Platform Motion**: enable, mode (linear/circular/random/spiral/
-  figure-8), max per-frame drift.
+  figure-8), max drift in camera pixels per frame (default 5, spec max
+  20). The drift moves the camera boresight itself and the pointing loop
+  has to cancel it.
 - **Link Budget**: beam divergence, fine-stage capture range, wavelength,
   link range -- context for the angular-error/pointing-loss/handoff
   metrics (Section 7).
@@ -115,8 +124,8 @@ and missing from the other. Groups, by tab:
 
 ## 6. The 3D view
 
-Both the desktop GUI's **3D View** tab and the web control page's live
-3D panel draw the same real geometry, computed the same way (verified
+Both the desktop GUI's **3D View** tab and the web console's 3D
+gimbal view (Live page and run reports) draw the same real geometry, computed the same way (verified
 byte-identical between the Python/OpenGL and JavaScript/Three.js
 implementations):
 
@@ -155,26 +164,47 @@ threshold, red = doesn't). On **Stop**, three files are written to
   camera pan/tilt, ground truth. Absent for raw-video runs (no camera
   geometry to record).
 
-## 8. The web dashboard and live control
+## 8. The web console
 
-Run `python web/dashboard_server.py`, then open:
+Run `python web/dashboard_server.py`, then open `http://127.0.0.1:8420/`.
+Each job has its own page, reachable from the sidebar (a bottom tab bar
+on phones):
 
-- **`http://127.0.0.1:8420/`** -- browse every past run (from either the
-  desktop app or the web control page below), see its metrics, and open
-  a full 3D replay of any run that has a `_frames.jsonl`.
-- **`http://127.0.0.1:8420/control`** -- a second, independent front-end
-  onto the same real engine as the desktop GUI: the identical 63-parameter
-  form (Section 3), an input-source selector with drag-and-drop `.mp4`
-  upload, Start/Stop, live tracking-error/FPS charts, and the live 3D view
-  streamed over a WebSocket as the run actually happens. Only one run can
-  be live at a time across the whole server (starting a second one while
-  one is active is rejected) -- this matches "one simulation engine," not
-  two independent ones that could disagree.
+- **Overview** (`/`): what the system does, the latest run scored against
+  the five performance targets, and the most recent runs.
+- **New run** (`/setup`): a five-step builder. Step 1 picks the source
+  (simulated scene or an uploaded `.mp4` for Benchmark 2), a quick-start
+  scenario, and real-time vs. as-fast-as-possible timing. Steps 2 to 5
+  hold Scene and camera, Beacon and motion, Disturbances, and Tracking.
+  Disturbance settings stay hidden until their switch is on. The right
+  column shows one real rendered camera frame with your disturbances
+  applied (plus a 4x close-up of the beacon), the beacon's path over the
+  first 60 s on the full screen, and a plain-language run summary.
+  Settings are remembered in the browser. **Start run** works from any
+  step and opens the Live page.
+- **Live** (`/live`): the actual camera feed with the tracker estimate,
+  detected spot, true beacon position and boresight drawn on top. Switch
+  to **Whole screen** for a top-down map of the scene with the camera's
+  view box, or **3D gimbal** for the pointing cone. The side column shows
+  the lock state, current error, pan/tilt, and each spec target turning
+  green or red live. **Stop and save** ends the run; a run that ends on
+  its own (video finished) is saved automatically too.
+- **Runs** (`/runs`): every recorded run with acquisition time, error,
+  target loss, worst re-acquisition and FPS, filterable by result or by
+  video runs. Click a row for its report.
+- **Run report** (`/runs/<name>`): spec scorecard, tracking error over time
+  with a lock-state ribbon, pan/tilt over time, the full performance log,
+  the exact scenario settings, and a scrubbable 3D replay. Downloads: the
+  performance log as JSON or CSV, and the per-frame **centroid log (CSV)**
+  with detected centroid, tracker estimate, truth and centroiding error
+  for every frame. **Print** gives a clean paper copy.
+- **Spec check** (`/spec`): every requirement from the problem statement,
+  what the system does about it, and the latest measured performance.
 
-Both UIs are genuinely two front-ends on one engine: a run started from
-`/control` behaves identically to one started from the desktop app (same
-`TrackingRunner`, same config resolution), and either one's results are
-browsable from `http://127.0.0.1:8420/`.
+Only one run can be live at a time across the whole server; starting a
+second while one is active is rejected with a message pointing to the
+Live page. A web run and a desktop run with the same settings are the
+same run: same `TrackingRunner`, same config resolution.
 
 ## 9. Troubleshooting
 
@@ -191,10 +221,10 @@ browsable from `http://127.0.0.1:8420/`.
   location setting or raise PTZ speed if you need faster worst-case
   acquisition.
 - **"No file selected" on Start in video mode**: click Browse (desktop)
-  or upload a file (web) first.
-- **Web `/control` says "a run is already active"**: only one live run
-  is allowed per server process; press Stop first, or check
-  `/api/control/status` to see what's running.
+  or drop a file on the New run page's Source step (web) first.
+- **Web console says "a run is already in progress"**: only one live
+  run is allowed per server process; open the Live page and press Stop
+  and save first.
 - **GUI window doesn't appear**: check the terminal for an exception (a
   missing dependency, or an invalid `.mp4` path, raises a dialog and logs
   to the status bar rather than crashing silently).
