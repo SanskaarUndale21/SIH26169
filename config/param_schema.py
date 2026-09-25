@@ -47,7 +47,26 @@ class Param:
         }
 
 
+def _algo_options(slot: str) -> List[Tuple[Any, str]]:
+    """Every available algorithm for a slot, built-ins first, including
+    user plugins found in user_algorithms/ at the time of the call."""
+    try:
+        from algorithms.registry import list_algorithms
+        return [(a["id"], a["name"] + (" (yours)" if a["source"] == "user" else ""))
+                for a in list_algorithms()["algorithms"] if a["slot"] == slot]
+    except Exception:
+        return [({"detector": "dog", "tracker": "imm", "controller": "pid"}[slot], "Default")]
+
+
 PARAM_SCHEMA: List[Param] = [
+    # --- Algorithms (which implementation runs each stage) ---
+    Param(("algorithms", "detector", "id"), "Detector", "Algorithms", "enum", "dog",
+          options=_algo_options("detector"), help="Finds beacon candidates in each frame"),
+    Param(("algorithms", "tracker", "id"), "Tracker", "Algorithms", "enum", "imm",
+          options=_algo_options("tracker"), help="Estimates the beacon position from detections"),
+    Param(("algorithms", "controller", "id"), "Pointing controller", "Algorithms", "enum", "pid",
+          options=_algo_options("controller"), help="Turns pointing error into pan/tilt rates"),
+
     # --- Scene ---
     Param(("screen", "width"), "Screen width", "Scene", "int", 2000, 500, 5000, 50, unit="px"),
     Param(("screen", "height"), "Screen height", "Scene", "int", 2000, 500, 5000, 50, unit="px"),
@@ -223,7 +242,7 @@ PARAM_SCHEMA: List[Param] = [
 ]
 
 GROUP_ORDER = [
-    "Scene", "Camera", "Target",
+    "Algorithms", "Scene", "Camera", "Target",
     "Motion: Straight Line", "Motion: Circular", "Motion: Figure-8", "Motion: Random Walk",
     "Motion: Spiral", "Motion: Sinusoidal", "Motion: User-defined",
     "PTZ", "Noise", "Jitter", "Atmosphere", "Turbulence", "Platform Motion",
@@ -250,6 +269,10 @@ def set_path(cfg: dict, path: Tuple, value):
 
 
 def schema_as_json() -> dict:
+    # refresh algorithm choices so newly added plugins show up without a restart
+    for p in PARAM_SCHEMA:
+        if p.path[0] == "algorithms":
+            p.options = _algo_options(p.path[1])
     return {"groups": GROUP_ORDER, "params": [p.to_dict() for p in PARAM_SCHEMA]}
 
 
@@ -276,6 +299,14 @@ def resolve_ui_values(base_cfg: dict, ui_values: dict) -> dict:
         elif p.kind == "text":
             value = str(value)
         set_path(cfg, p.path, value)
+
+    # Per-algorithm parameters are not in the static schema (they depend on
+    # which plugin is chosen): "algorithms/<slot>/params/<name>" keys are
+    # copied through as-is, and the algorithm itself validates their types.
+    for key, value in ui_values.items():
+        parts = key.split("/")
+        if len(parts) == 4 and parts[0] == "algorithms" and parts[2] == "params":
+            set_path(cfg, tuple(parts), value)
 
     # initial_location UI convenience -> real config value
     if get_path(cfg, ("target", "initial_location")) == "fixed_center":

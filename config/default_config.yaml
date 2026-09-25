@@ -104,5 +104,14 @@ control:
     pan: {kp: 2.5, ki: 0.15, kd: 0.35}
     tilt: {kp: 2.5, ki: 0.15, kd: 0.35}
 
+# Which algorithm runs each stage of the loop. Built-in ids: detector
+# dog | threshold, tracker imm | kalman_cv | hold_last, controller pid |
+# p_only. Your own plugins in user_algorithms/ appear as
+# "user:<file>:<ClassName>". params are passed to the algorithm.
+algorithms:
+  detector: {id: dog, params: {}}
+  tracker: {id: imm, params: {}}
+  controller: {id: pid, params: {}}
+
 logging:
   output_dir: logs

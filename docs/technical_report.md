@@ -131,6 +131,31 @@ screen:
   (detected centroid, tracker estimate, truth, centroiding error) that
   Benchmarks 1 and 2 ask for, from the saved frame trace.
 
+### 3.3a Algorithm test bench (`algorithms/`, `user_algorithms/`)
+
+The loop's three algorithmic stages are pluggable: `Detector.detect(image)`,
+`Tracker.update(dt, measurement)` and `Controller.compute(err_x, err_y,
+dt)` (`algorithms/api.py`). `perception/pipeline.py` and
+`control/stepper.py` get their stages from `algorithms/registry.py`,
+which offers the built-ins plus every subclass found in
+`user_algorithms/*.py`, re-imported on change. Gating, the lock state
+machine, search, actuation and all metrics stay shared, so swapping one
+stage isolates its effect. The tuned defaults (DoG detector, IMM tracker,
+PID) are themselves registry entries and reproduce the earlier hard-wired
+behaviour; simple baselines (global threshold, constant-velocity Kalman,
+hold-last, proportional-only) are included for reference.
+
+`algorithms/benchmark.py` runs a scenarios × algorithm-sets × seeds
+matrix headlessly. Python and NumPy RNGs and the simulator seed are fixed
+per repeat, so every set sees an identical beacon path and noise
+realisation; a test asserts that the same seed reproduces the same result
+and a different tracker changes it. Each run is judged against the Section
+10 targets, with processing speed measured as algorithm-only throughput
+(1000 / processing ms), since the loop FPS also includes the simulator's
+rendering cost. The web console's Algorithms and Compare pages expose
+writing, checking, uploading and comparing plugins; see
+`docs/algorithm_guide.md`.
+
 ### 3.4 Real per-frame telemetry and the two 3D views
 
 `perf_logging/frame_log.py`'s `FrameRecord` captures one real record per

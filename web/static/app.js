@@ -6,6 +6,8 @@ const ICONS = {
   setup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
   live: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 9v6M9 12h6"/></svg>',
   runs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>',
+  algorithms: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>',
+  compare: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5V15a3 3 0 0 0 3 3h6.5M18 15.5V9a3 3 0 0 0-3-3H8.5"/></svg>',
   spec: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 15h8"/></svg>',
 };
 
@@ -72,6 +74,17 @@ export const MOTION_NAMES = {
 };
 export const LOCK_NAMES = { searching: "Searching", acquiring: "Acquiring", reacquiring: "Re-acquiring", locked: "Locked" };
 export const LOCK_COLORS = { searching: "#ff6e57", acquiring: "#8fb4ff", reacquiring: "#8fb4ff", locked: "#37d8a8" };
+
+export const SLOT_NAMES = { detector: "Detector", tracker: "Tracker", controller: "Controller" };
+const DEFAULT_ALGOS = { detector: "dog", tracker: "imm", controller: "pid" };
+
+/** "Default algorithms" or the names of the non-default ones. */
+export function describeAlgos(algos) {
+  if (!algos) return "Default algorithms";
+  const custom = Object.entries(algos).filter(([slot, a]) => a && a.id !== DEFAULT_ALGOS[slot]);
+  if (!custom.length) return "Default algorithms";
+  return custom.map(([, a]) => a.name.replace(" (example)", "")).join(", ");
+}
 
 export function describeRun(info) {
   if (!info) return "Desktop app run";

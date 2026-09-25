@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare Algorithms</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .sec { margin-top: 28px; }
+  .sec > h2 { margin-bottom: 4px; }
+  .sec > .muted { margin: 0 0 14px; font-size: 14px; }
+  .variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+  .variant { border-radius: var(--r-lg); background: var(--deck); border: 1px solid var(--rule-soft); padding: 18px; border-top: 4px solid var(--vc); display: grid; gap: 14px; align-content: start; }
+  .variant .top { display: flex; gap: 8px; align-items: center; }
+  .variant .top input { font-weight: 650; }
+  .variant details summary { cursor: pointer; font-size: 13px; color: var(--dim); }
+  .variant details .field { margin-top: 12px; }
+  .add { display: grid; place-items: center; border: 1.5px dashed var(--rule); border-radius: var(--r-lg); min-height: 180px; background: transparent; color: var(--dim); cursor: pointer; font-weight: 600; }
+  .add:hover { color: var(--text); border-color: var(--dim); }
+  .scen { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .scen label { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 12px 14px; border-radius: var(--r-md); background: var(--deck); border: 1px solid var(--rule-soft); cursor: pointer; }
+  .scen label:has(input:checked) { border-color: var(--beacon); }
+  .scen input { accent-color: var(--beacon); margin: 3px 0 0; }
+  .scen strong { font-size: 14px; }
+  .scen span { grid-column: 2; font-size: 12.5px; color: var(--dim); }
+  .settings { display: flex; flex-wrap: wrap; gap: 28px; align-items: end; }
+  .run-bar { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; margin-top: 26px; padding: 18px 22px; border-radius: var(--r-lg); background: var(--deck-2); }
+  .progress { height: 8px; border-radius: 99px; background: var(--ink); overflow: hidden; margin-top: 10px; }
+  .progress i { display: block; height: 100%; background: var(--beacon); width: 0; transition: width .3s; }
+  table.cmp th.v { color: var(--text); font-size: 13.5px; }
+  table.cmp td.best { font-weight: 700; }
+  table.cmp td .sub { display: block; font-size: 12px; color: var(--faint); font-weight: 400; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; background: var(--vc); }
+  .headline { font-stretch: 112%; font-size: 20px; font-weight: 650; margin: 0 0 14px; max-width: 70ch; }
+  .chart { width: 100%; height: 240px; }
+  .cell-pass { color: var(--lock); } .cell-fail { color: var(--search); }
+  .hist { display: grid; gap: 1px; background: var(--rule-soft); border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--rule-soft); }
+  .hist button { display: flex; justify-content: space-between; gap: 12px; padding: 12px 18px; background: var(--deck); border: 0; text-align: left; cursor: pointer; font-size: 14px; }
+  .hist button:hover { background: var(--deck-2); }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Compare algorithms</h1>
+      <p class="lede">Run two to four algorithm sets through the same scenarios with the same random seeds, so the beacon path,
+        noise and disturbances are identical. Every run is scored against the problem statement's targets.</p>
+    </div>
+  </div>
+
+  <section class="sec">
+    <h2>Algorithm sets</h2>
+    <p class="muted">Each set picks one detector, tracker and controller. <a href="/algorithms">Write or upload your own</a>.</p>
+    <div class="variants" id="variants"></div>
+  </section>
+
+  <section class="sec">
+    <h2>Scenarios</h2>
+    <p class="muted">Every set runs every scenario you tick.</p>
+    <div class="scen" id="scen"></div>
+  </section>
+
+  <section class="sec">
+    <h2>Run settings</h2>
+    <div class="settings">
+      <div class="field"><span class="field-label">Repeats per scenario</span>
+        <div class="seg" id="seeds" role="group" aria-label="Repeats"></div>
+        <span class="field-help">Each repeat uses a different random seed, shared by all sets.</span></div>
+      <div class="field"><span class="field-label">Length of each run</span>
+        <div class="seg" id="dur" role="group" aria-label="Duration"></div>
+        <span class="field-help">Simulated seconds. Runs go as fast as the computer allows.</span></div>
+    </div>
+  </section>
+
+  <div class="run-bar" id="runBar">
+    <div style="flex:1;min-width:240px">
+      <strong id="plan">Plan</strong>
+      <div class="progress" id="prog" hidden><i id="progFill"></i></div>
+      <div class="small muted" id="progText" style="margin-top:6px"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn danger" id="cancelBtn" type="button" hidden>Cancel</button>
+      <button class="btn primary lg" id="runBtn" type="button">Run comparison</button>
+    </div>
+  </div>
+
+  <section class="sec" id="results" hidden>
+    <div class="panel-head" style="margin-bottom:6px"><h2>Results</h2><a class="btn quiet" id="dl" download>Download JSON</a></div>
+    <p class="headline" id="headline"></p>
+    <div class="panel" style="padding:8px 8px 0"><div class="table-wrap"><table class="data cmp" id="summary"></table></div></div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-head"><h3>Average tracking error by scenario</h3><span class="legend" id="chartLegend"></span></div>
+      <canvas class="chart" id="chart"></canvas>
+    </div>
+    <div class="panel" style="padding:8px 8px 0;margin-top:16px"><div class="table-wrap"><table class="data cmp" id="matrix"></table></div></div>
+    <div id="failures"></div>
+  </section>
+
+  <section class="sec">
+    <h2>Past comparisons</h2>
+    <div id="history"></div>
+  </section>
+</main>
+</div>
+
+<script type="module">
+import { api, toast, fmt, SLOT_NAMES } from "/static/app.js";
+const $ = id => document.getElementById(id);
+const COLORS = ["#ffb53d", "#8fb4ff", "#d69cff", "#6fe0f0"];
+const DEF = { detector: "dog", tracker: "imm", controller: "pid" };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let algos = [], scenarios = [], variants = [], seeds = 2, dur = 10, poll = null;
+const byId = id => algos.find(a => a.id === id);
+
+// ---------- variants ----------
+function newVariant(name, sel = {}) {
+  return { name, algorithms: Object.fromEntries(Object.keys(SLOT_NAMES).map(s => [s, { id: sel[s] || DEF[s], params: {} }])) };
+}
+function renderVariants() {
+  $("variants").innerHTML = variants.map((v, i) => `
+    <div class="variant" style="--vc:${COLORS[i]}">
+      <div class="top"><input type="text" value="${esc(v.name)}" data-name="${i}" aria-label="Set name">
+        ${variants.length > 1 ? `<button class="btn quiet" type="button" data-rm="${i}" aria-label="Remove ${esc(v.name)}">Remove</button>` : ""}</div>
+      ${Object.keys(SLOT_NAMES).map(slot => {
+        const cur = v.algorithms[slot], a = byId(cur.id);
+        const params = a ? Object.entries(a.params) : [];
+        return `<div class="field"><label class="field-label" for="v${i}${slot}">${SLOT_NAMES[slot]}</label>
+          <select id="v${i}${slot}" data-v="${i}" data-slot="${slot}">
+            ${algos.filter(x => x.slot === slot).map(x => `<option value="${esc(x.id)}" ${x.id === cur.id ? "selected" : ""}>${esc(x.name)}${x.source === "user" ? " (yours)" : ""}</option>`).join("")}
+          </select>
+          ${params.length ? `<details><summary>${params.length} parameter${params.length > 1 ? "s" : ""}</summary>
+            ${params.map(([k, p]) => `<div class="field"><label class="field-label" for="p${i}${slot}${k}"><span>${esc(p.label)}</span></label>
+              <input ${p.kind === "bool" ? 'type="checkbox"' : p.kind === "text" ? 'type="text"' : `type="number" step="${p.step ?? "any"}" ${p.min != null ? `min="${p.min}" max="${p.max}"` : ""}`}
+                id="p${i}${slot}${k}" data-p="${i}|${slot}|${k}" ${p.kind === "bool" ? (cur.params[k] ?? p.default ? "checked" : "") : `value="${esc(cur.params[k] ?? p.default)}"`}>
+              ${p.help ? `<span class="field-help">${esc(p.help)}</span>` : ""}</div>`).join("")}</details>` : ""}</div>`;
+      }).join("")}
+    </div>`).join("") + (variants.length < 4 ? `<button class="add" type="button" id="addBtn">Add another set</button>` : "");
+  document.querySelectorAll("[data-name]").forEach(el => el.oninput = () => { variants[+el.dataset.name].name = el.value; });
+  document.querySelectorAll("[data-rm]").forEach(el => el.onclick = () => { variants.splice(+el.dataset.rm, 1); renderVariants(); plan(); });
+  document.querySelectorAll("select[data-v]").forEach(el => el.onchange = () => {
+    variants[+el.dataset.v].algorithms[el.dataset.slot] = { id: el.value, params: {} }; renderVariants();
+  });
+  document.querySelectorAll("[data-p]").forEach(el => el.onchange = () => {
+    const [i, slot, k] = el.dataset.p.split("|");
+    variants[+i].algorithms[slot].params[k] = el.type === "checkbox" ? el.checked : el.type === "number" ? +el.value : el.value;
+  });
+  const add = $("addBtn");
+  if (add) add.onclick = () => { variants.push(newVariant(`Set ${String.fromCharCode(65 + variants.length)}`)); renderVariants(); plan(); };
+}
+
+// ---------- scenarios + settings ----------
+function renderScenarios() {
+  const on = new Set(["default", "noise", "weather", "platform"]);
+  $("scen").innerHTML = scenarios.map(s => `<label><input type="checkbox" value="${s.id}" ${on.has(s.id) ? "checked" : ""}>
+    <strong>${esc(s.title)}</strong><span>${esc(s.desc)}</span></label>`).join("");
+  $("scen").querySelectorAll("input").forEach(el => el.onchange = plan);
+}
+function seg(host, options, current, set) {
+  host.innerHTML = options.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${v === current}">${l}</button>`).join("");
+  host.querySelectorAll("button").forEach(b => b.onclick = () => {
+    set(+b.dataset.v); host.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); plan();
+  });
+}
+const chosenScenarios = () => [...$("scen").querySelectorAll("input:checked")].map(i => i.value);
+function plan() {
+  const n = chosenScenarios().length * variants.length * seeds;
+  const est = Math.max(1, Math.round(n * dur * 0.4));
+  $("plan").textContent = n ? `${n} runs: ${variants.length} set${variants.length > 1 ? "s" : ""} × ${chosenScenarios().length} scenario${chosenScenarios().length > 1 ? "s" : ""} × ${seeds} repeat${seeds > 1 ? "s" : ""}, about ${est < 60 ? est + " s" : Math.round(est / 60) + " min"}`
+    : "Tick at least one scenario";
+  $("runBtn").disabled = !n;
+}
+
+// ---------- run ----------
+$("runBtn").onclick = async () => {
+  try {
+    await api("/api/bench/start", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variants, scenarios: chosenScenarios(), seeds, duration_s: dur }) });
+    watch();
+  } catch (e) { toast(e.message, true); }
+};
+$("cancelBtn").onclick = async () => { try { await api("/api/bench/cancel", { method: "POST" }); } catch (e) { toast(e.message, true); } };
+
+function watch() {
+  $("runBtn").disabled = true; $("cancelBtn").hidden = false; $("prog").hidden = false;
+  clearInterval(poll);
+  poll = setInterval(async () => {
+    const r = await api("/api/bench/status");
+    if (!r) return;
+    $("progFill").style.width = `${(r.progress / Math.max(1, r.total)) * 100}%`;
+    $("progText").textContent = r.done ? "" : `${r.progress} of ${r.total} runs done`;
+    if (r.progress) show(r);
+    if (r.done) {
+      clearInterval(poll);
+      $("runBtn").disabled = false; $("cancelBtn").hidden = true; $("prog").hidden = true;
+      toast(r.cancelled ? "Comparison cancelled. Partial results are saved." : r.error ? "Comparison stopped with an error." : "Comparison finished and saved.", !!r.error);
+      history(); plan();
+    }
+  }, 700);
+}
+
+// ---------- results ----------
+const ROWS = [
+  ["pass_rate", "Runs meeting every target", v => `${fmt(v * 100, 0)}%`, "max", null],
+  ["acquisition_time_sec", "Acquisition time, mean", v => `${fmt(v)} s`, "min", 2],
+  ["avg_tracking_error_px", "Tracking error, mean", v => `${fmt(v)} px`, "min", 10],
+  ["max_tracking_error_px", "Tracking error, worst frame", v => `${fmt(v, 1)} px`, "min", null],
+  ["target_loss_pct", "Target loss, mean", v => `${fmt(v, 2)}%`, "min", 5],
+  ["worst_reacquisition_sec", "Re-acquisition, worst", v => `${fmt(v)} s`, "min", 1],
+  ["processing_fps", "Processing speed (algorithms only)", v => `${fmt(v, 0)} FPS`, "max", 20],
+  ["detection_rate", "Frames with a detection", v => `${fmt(v * 100, 1)}%`, "max", null],
+];
+function show(r) {
+  window._last = r;
+  $("results").hidden = false;
+  $("dl").href = `/api/bench/${r.id}`;
+  const vs = r.variants, S = r.summary;
+  // headline
+  const ranked = vs.map((v, i) => ({ v, s: S[i], i })).filter(x => x.s.runs).sort((a, b) =>
+    b.s.pass_rate - a.s.pass_rate || (a.s.avg_tracking_error_px ?? 1e9) - (b.s.avg_tracking_error_px ?? 1e9));
+  $("headline").textContent = ranked.length ? ranked.map(x => `${x.v.name} met every target in ${x.s.passes} of ${x.s.runs} runs`).join(". ") + "." : "";
+  // summary table
+  $("summary").innerHTML = `<thead><tr><th>Measure</th>${vs.map((v, i) => `<th class="v"><span class="swatch" style="--vc:${COLORS[i]}"></span>${esc(v.name)}
+    <span class="sub faint" style="display:block;font-weight:400">${Object.values(v.algorithms).map(a => esc(a.name.replace(" (default)", ""))).join(" + ")}</span></th>`).join("")}</tr></thead>
+    <tbody>${ROWS.map(([k, label, f, better, target]) => {
+      const vals = S.map(s => s[k]);
+      // Averages only cover runs that locked on. A set that failed to lock
+      // in some runs can't be "best" on them, and says how many it covers.
+      const full = S.map(s => k === "pass_rate" || k === "processing_fps" || k === "detection_rate" || s.acquired === s.runs);
+      const valid = vals.filter((x, i) => x != null && full[i]);
+      const allSame = valid.length && valid.every(x => x === valid[0]);
+      const best = valid.length > 1 && !allSame ? (better === "min" ? Math.min(...valid) : Math.max(...valid)) : null;
+      return `<tr><td>${label}${target != null ? `<span class="sub">target ${better === "min" ? "≤" : "≥"} ${target}</span>` : ""}</td>${vals.map((v, i) => {
+        const cls = v == null ? "" : target == null ? "" : ((better === "min" ? v <= target : v >= target) ? "cell-pass" : "cell-fail");
+        const isBest = v != null && full[i] && v === best;
+        const note = !full[i] ? `<span class="sub">only ${S[i].acquired} of ${S[i].runs} runs locked</span>` : isBest ? '<span class="sub">best</span>' : "";
+        return `<td class="${cls} ${isBest ? "best" : ""}">${v == null ? "–" : f(v)}${note}</td>`;
+      }).join("")}</tr>`;
+    }).join("")}</tbody>`;
+  // matrix
+  $("matrix").innerHTML = `<thead><tr><th>Scenario</th>${vs.map((v, i) => `<th class="v"><span class="swatch" style="--vc:${COLORS[i]}"></span>${esc(v.name)}</th>`).join("")}</tr></thead>
+    <tbody>${r.scenarios.map(sc => `<tr><td>${esc(sc.title)}</td>${vs.map((_, i) => {
+      const c = r.matrix[`${sc.id}|${i}`];
+      if (!c) return `<td class="faint">waiting</td>`;
+      if (c.errors === c.runs) return `<td class="cell-fail">crashed</td>`;
+      return `<td><span class="chip ${c.passes === c.runs ? "pass" : "fail"}">${c.passes}/${c.runs} pass</span>
+        <span class="sub">${c.acquisition_time_sec == null ? "never locked" : fmt(c.acquisition_time_sec) + " s"}, ${fmt(c.avg_tracking_error_px)} px, ${fmt(c.target_loss_pct, 1)}% loss</span></td>`;
+    }).join("")}</tr>`).join("")}</tbody>`;
+  // chart
+  $("chartLegend").innerHTML = vs.map((v, i) => `<span><i style="background:${COLORS[i]}"></i>${esc(v.name)}</span>`).join("");
+  drawBars(r);
+  // failures
+  const fails = r.cells.filter(c => c.error);
+  $("failures").innerHTML = fails.length ? `<div class="panel" style="margin-top:16px;border-color:rgba(255,110,87,.45)"><h3 class="cell-fail">${fails.length} run${fails.length > 1 ? "s" : ""} crashed</h3>
+    ${fails.slice(0, 5).map(c => `<p class="small" style="margin:10px 0 2px"><strong>${esc(vs[c.variant].name)}</strong>, ${esc(r.scenarios.find(s => s.id === c.scenario)?.title)}, seed ${c.seed}</p>
+    <pre style="white-space:pre-wrap;font:12px/1.5 Consolas,monospace;color:#ffcfc6;margin:0">${esc(c.error)}</pre>`).join("")}</div>` : "";
+}
+
+function drawBars(r) {
+  const c = $("chart"), d = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  c.width = W * d; c.height = H * d; const ctx = c.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, W, H);
+  const vals = r.scenarios.map(s => r.variants.map((_, i) => r.matrix[`${s.id}|${i}`]?.avg_tracking_error_px ?? null));
+  const raw = Math.max(12, ...vals.flat().filter(v => v != null)) * 1.05;
+  const stepV = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 500].find(x => x * 4 >= raw) || Math.ceil(raw / 4);
+  const maxV = stepV * 4;
+  const padL = 36, padB = 34, padT = 10, gw = (W - padL) / r.scenarios.length, bw = Math.min(28, (gw - 18) / r.variants.length);
+  const sy = v => padT + (1 - v / maxV) * (H - padT - padB);
+  ctx.font = "11px Archivo, system-ui"; ctx.fillStyle = "#6c7aa3"; ctx.strokeStyle = "rgba(143,164,222,0.12)";
+  for (let i = 0; i <= 4; i++) { const v = maxV * i / 4; ctx.beginPath(); ctx.moveTo(padL, sy(v)); ctx.lineTo(W, sy(v)); ctx.stroke(); ctx.fillText(fmt(v, 0), 4, sy(v) + 4); }
+  ctx.strokeStyle = "rgba(255,110,87,0.7)"; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(padL, sy(10)); ctx.lineTo(W, sy(10)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = "#ff9a88"; ctx.fillText("10 px limit", W - 64, sy(10) - 5);
+  r.scenarios.forEach((s, si) => {
+    const x0 = padL + si * gw + (gw - bw * r.variants.length) / 2;
+    vals[si].forEach((v, vi) => {
+      const cell = r.matrix[`${s.id}|${vi}`];
+      if (v == null) {
+        if (cell) { ctx.fillStyle = "#ff9a88"; ctx.save(); ctx.translate(x0 + vi * bw + bw / 2 + 4, sy(0) - 6); ctx.rotate(-Math.PI / 2); ctx.fillText("no lock", 0, 0); ctx.restore(); }
+        return;
+      }
+      ctx.fillStyle = COLORS[vi]; ctx.fillRect(x0 + vi * bw + 1, sy(v), bw - 2, sy(0) - sy(v));
+    });
+    ctx.fillStyle = "#a3aecd";
+    const label = s.title.length > 16 ? s.title.slice(0, 15) + "…" : s.title;
+    ctx.fillText(label, padL + si * gw + gw / 2 - ctx.measureText(label).width / 2, H - 12);
+  });
+}
+addEventListener("resize", () => { if (window._last) drawBars(window._last); });
+
+// ---------- history ----------
+async function history() {
+  const list = await api("/api/bench");
+  $("history").innerHTML = list.length ? `<div class="hist">${list.map(b => {
+    const m = /bench_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/.exec(b.id);
+    const when = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : b.id;
+    return `<button type="button" data-b="${b.id}"><span>${when}: ${b.variants.map(esc).join(" vs ")}</span>
+      <span class="muted">${b.runs} runs${b.cancelled ? ", cancelled" : ""}</span></button>`;
+  }).join("")}</div>` : `<div class="panel empty"><h3>No comparisons yet</h3><p>Results are saved here after each one.</p></div>`;
+  document.querySelectorAll("[data-b]").forEach(b => b.onclick = async () => {
+    const r = await api(`/api/bench/${b.dataset.b}`); window._last = r; show(r); $("results").scrollIntoView({ behavior: "smooth" });
+  });
+}
+
+// ---------- boot ----------
+(async () => {
+  [algos, scenarios] = await Promise.all([api("/api/algorithms").then(x => x.algorithms), api("/api/scenarios")]);
+  const qs = new URLSearchParams(location.search);
+  variants = [newVariant("Default")];
+  if (qs.get("slot") && qs.get("id") && byId(qs.get("id"))) {
+    variants.push(newVariant(byId(qs.get("id")).name.replace(" (example)", ""), { [qs.get("slot")]: qs.get("id") }));
+  } else {
+    const pick = slot => (algos.find(a => a.slot === slot && a.source === "user") || algos.find(a => a.slot === slot && !a.default) || {}).id;
+    variants.push(newVariant("Alternatives", { detector: pick("detector"), tracker: pick("tracker"), controller: pick("controller") }));
+  }
+  renderVariants(); renderScenarios();
+  seg($("seeds"), [[1, "1"], [2, "2"], [3, "3"], [5, "5"]], seeds, v => seeds = v);
+  seg($("dur"), [[5, "5 s"], [10, "10 s"], [20, "20 s"], [30, "30 s"]], dur, v => dur = v);
+  plan(); history();
+  const st = await api("/api/bench/status");
+  if (st && !st.done) watch(); else if (st) { window._last = st; show(st); }
+})();
+</script>
+</body>
+</html>

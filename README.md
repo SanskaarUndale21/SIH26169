@@ -45,7 +45,19 @@ desktop GUI (`web/live_engine.py` runs a real `TrackingRunner`):
 - `/runs` and `/runs/<name>`: every run, and a report per run with charts,
   3D replay, and downloads (performance log JSON/CSV, per-frame centroid
   log CSV).
+- `/algorithms` Algorithms: browse built-in and plugin algorithms, write
+  one from a template in the browser, upload a `.py`, and check it on two
+  quick scenarios before saving.
+- `/compare` Compare: run two to four algorithm sets through the same
+  scenarios with the same seeds, scored against the spec targets.
 - `/spec` Spec check: every problem-statement requirement and its status.
+
+## Test your own algorithm
+
+Any of the three loop stages (detector, tracker, pointing controller) can
+be replaced by a Python class in `user_algorithms/`, written against
+`algorithms/api.py`. See `docs/algorithm_guide.md`. Three working
+examples ship in `user_algorithms/`.
 
 ## Run tests
 

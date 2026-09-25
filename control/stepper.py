@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-from control.pid_controller import PIDPointingController
+from algorithms import registry
+from algorithms.api import AlgorithmError, check_point
 from control.search_driver import RasterSweepDriver, SpiralSweepDriver
 
 
@@ -18,7 +19,14 @@ class PointingStepper:
         """camera: simulator.camera_model.CameraModel, or None if this run
         has no PTZ to drive (video-file mode)."""
         self.camera = camera
-        self.controller = PIDPointingController(config)
+        # Pointing controller comes from the algorithm registry (default:
+        # the built-in PID), so a user plugin can replace it.
+        w = camera.width_px if camera is not None else 640
+        h = camera.height_px if camera is not None else 480
+        fov = (camera.fov_x_deg, camera.fov_y_deg) if camera is not None else None
+        self.controller = registry.create("controller", config,
+                                          registry.context_from_config(config, w, h, fov))
+        self._ctrl_name = self.controller.display_name()
 
         max_pan = config.get("ptz", {}).get("max_pan_speed_deg_s", 5.0)
         max_tilt = config.get("ptz", {}).get("max_tilt_speed_deg_s", 5.0)
@@ -55,7 +63,13 @@ class PointingStepper:
         if telemetry.lock_state in ("locked", "acquiring"):
             err_x_deg = (telemetry.predicted_px[0] - frame_width / 2) / self.camera.px_per_deg_x
             err_y_deg = (telemetry.predicted_px[1] - frame_height / 2) / self.camera.px_per_deg_y
-            pan_rate, tilt_rate = self.controller.compute(err_x_deg, err_y_deg, dt_ctrl)
+            try:
+                out = self.controller.compute(err_x_deg, err_y_deg, dt_ctrl)
+            except AlgorithmError:
+                raise
+            except Exception as exc:
+                raise AlgorithmError(f"Controller '{self._ctrl_name}' crashed: {exc}")
+            pan_rate, tilt_rate = check_point(out, self._ctrl_name, "Controller")
         elif telemetry.lock_state == "reacquiring":
             if self._prev_lock_state != "reacquiring":
                 self.spiral_search.recenter()

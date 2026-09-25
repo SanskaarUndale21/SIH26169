@@ -23,6 +23,7 @@ import base64
 import csv
 import io
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -40,6 +41,8 @@ UPLOAD_DIR = REPO_ROOT / "data" / "uploaded_videos"
 sys.path.insert(0, str(REPO_ROOT))  # so live_engine's `from control...` imports resolve
 from web.live_engine import engine as live_engine  # noqa: E402
 from config.param_schema import schema_as_json, resolve_ui_values, apply_scenario_preset_if_set  # noqa: E402
+from algorithms import registry  # noqa: E402
+from algorithms.api import AlgorithmError  # noqa: E402
 
 app = FastAPI(title="FSOC Coarse Alignment Console")
 # Three.js and fonts fallbacks are local, so every page works offline at a demo.
@@ -109,6 +112,8 @@ NAV = [
     ("/setup", "setup", "New run"),
     ("/live", "live", "Live"),
     ("/runs", "runs", "Runs"),
+    ("/algorithms", "algorithms", "Algorithms"),
+    ("/compare", "compare", "Compare"),
     ("/spec", "spec", "Spec check"),
 ]
 
@@ -167,6 +172,16 @@ def page_report(run_name: str):
 @app.get("/spec", response_class=HTMLResponse)
 def page_spec():
     return _page("spec.html", "spec")
+
+
+@app.get("/algorithms", response_class=HTMLResponse)
+def page_algorithms():
+    return _page("algorithms.html", "algorithms")
+
+
+@app.get("/compare", response_class=HTMLResponse)
+def page_compare():
+    return _page("compare.html", "compare")
 
 
 # old URLs keep working
@@ -319,6 +334,178 @@ def api_preview(payload: dict) -> JSONResponse:
         "paths": paths,
     })
 
+
+# ---------------------------------------------------------------------------
+# Algorithms: list, view source, write, check, upload, delete
+# ---------------------------------------------------------------------------
+
+_FILENAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,60}\.py$")
+
+
+def _user_file(filename: str) -> Path:
+    if not _FILENAME_RE.match(filename or ""):
+        raise HTTPException(status_code=400, detail="File name must be lowercase letters, digits and underscores, ending in .py")
+    return registry.USER_DIR / filename
+
+
+@app.get("/api/algorithms")
+def api_algorithms() -> JSONResponse:
+    return JSONResponse(registry.list_algorithms())
+
+
+@app.get("/api/algorithms/source")
+def api_algorithm_source(id: str = "", file: str = "") -> JSONResponse:
+    import inspect
+    if file:
+        path = _user_file(file)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="file not found")
+        return JSONResponse({"file": file, "code": path.read_text(encoding="utf-8"), "editable": True})
+    try:
+        cls = registry.get(id)
+    except AlgorithmError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if id.startswith("user:"):
+        fname = id.split(":")[1] + ".py"
+        return JSONResponse({"file": fname, "code": (registry.USER_DIR / fname).read_text(encoding="utf-8"), "editable": True})
+    return JSONResponse({"file": None, "code": inspect.getsource(cls), "editable": False})
+
+
+@app.get("/api/algorithms/template")
+def api_algorithm_template(slot: str, title: str = "My algorithm") -> JSONResponse:
+    from algorithms.templates import TEMPLATES, render
+    if slot not in TEMPLATES:
+        raise HTTPException(status_code=400, detail="slot must be detector, tracker or controller")
+    words = re.findall(r"[A-Za-z0-9]+", title) or ["My"]
+    cls = "".join(w[:1].upper() + w[1:] for w in words)
+    if cls[0].isdigit():
+        cls = "Algo" + cls
+    fname = "_".join(w.lower() for w in words)[:50]
+    if fname[0].isdigit():
+        fname = "algo_" + fname
+    return JSONResponse({"file": f"{fname}.py", "code": render(slot, title.replace('"', "'"), cls)})
+
+
+@app.post("/api/algorithms/check")
+def api_algorithm_check(payload: dict) -> JSONResponse:
+    from algorithms.benchmark import validate_code
+    code = payload.get("code") or ""
+    if not code.strip():
+        raise HTTPException(status_code=400, detail="Nothing to check: the editor is empty")
+    return JSONResponse(validate_code(code))
+
+
+@app.post("/api/algorithms/save")
+def api_algorithm_save(payload: dict) -> JSONResponse:
+    path = _user_file(payload.get("file", ""))
+    code = payload.get("code") or ""
+    if path.exists() and not payload.get("overwrite"):
+        raise HTTPException(status_code=409, detail=f"{path.name} already exists")
+    try:
+        compile(code, path.name, "exec")
+    except SyntaxError as exc:
+        raise HTTPException(status_code=400, detail=f"Syntax error on line {exc.lineno}: {exc.msg}")
+    registry.USER_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(code, encoding="utf-8")
+    listing = registry.list_algorithms()
+    return JSONResponse({"file": path.name, "error": listing["errors"].get(path.name), **listing})
+
+
+@app.post("/api/algorithms/upload")
+async def api_algorithm_upload(file: UploadFile, overwrite: bool = False) -> JSONResponse:
+    name = Path(file.filename or "").name.lower().replace("-", "_").replace(" ", "_")
+    code = (await file.read()).decode("utf-8", errors="replace")
+    return api_algorithm_save({"file": name, "code": code, "overwrite": overwrite})
+
+
+@app.delete("/api/algorithms/file/{filename}")
+def api_algorithm_delete(filename: str) -> JSONResponse:
+    path = _user_file(filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+    path.unlink()
+    return JSONResponse(registry.list_algorithms())
+
+
+@app.get("/api/scenarios")
+def api_scenarios() -> JSONResponse:
+    from config.scenarios import SCENARIOS
+    return JSONResponse(SCENARIOS)
+
+
+# ---------------------------------------------------------------------------
+# Benchmark: compare algorithm variants on the same scenarios and seeds
+# ---------------------------------------------------------------------------
+
+_bench = {"job": None}
+
+
+@app.post("/api/bench/start")
+def api_bench_start(payload: dict) -> JSONResponse:
+    from algorithms.benchmark import BenchJob
+    job = _bench["job"]
+    if job is not None and not job.done:
+        raise HTTPException(status_code=409, detail="A comparison is already running")
+    if live_engine.is_running():
+        raise HTTPException(status_code=409, detail="A live run is in progress. Stop it first so timings are fair")
+    variants = payload.get("variants") or []
+    scenarios = payload.get("scenarios") or []
+    if len(variants) < 1 or not scenarios:
+        raise HTTPException(status_code=400, detail="Pick at least one scenario and one algorithm set")
+    for v in variants:
+        for slot in ("detector", "tracker", "controller"):
+            try:
+                registry.get(v["algorithms"][slot]["id"])
+            except (KeyError, AlgorithmError) as exc:
+                raise HTTPException(status_code=400, detail=f"{v.get('name', 'Variant')}: {exc}")
+    if "video" in scenarios and not payload.get("video_path"):
+        raise HTTPException(status_code=400, detail="Upload a video to include it")
+    job = BenchJob(scenarios, variants, int(payload.get("seeds", 1)), float(payload.get("duration_s", 10)),
+                   str(LOGS_DIR), base_ui_values=payload.get("base_ui_values"),
+                   video_path=payload.get("video_path"))
+    _bench["job"] = job.start()
+    return JSONResponse({"id": job.id, "total": job.total})
+
+
+@app.get("/api/bench/status")
+def api_bench_status() -> JSONResponse:
+    job = _bench["job"]
+    return JSONResponse(job.result() if job is not None else None)
+
+
+@app.post("/api/bench/cancel")
+def api_bench_cancel() -> JSONResponse:
+    job = _bench["job"]
+    if job is None or job.done:
+        raise HTTPException(status_code=409, detail="No comparison is running")
+    job.cancel()
+    return JSONResponse({"cancelled": True})
+
+
+@app.get("/api/bench")
+def api_bench_list() -> JSONResponse:
+    out = []
+    for p in sorted(LOGS_DIR.glob("bench_*.json"), reverse=True):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        out.append({"id": d["id"], "variants": [v["name"] for v in d["variants"]],
+                    "scenarios": len(d["scenarios"]), "runs": d["progress"], "total": d["total"],
+                    "cancelled": d.get("cancelled"), "pass_rates": [s["pass_rate"] for s in d["summary"]]})
+    return JSONResponse(out)
+
+
+@app.get("/api/bench/{bench_id}")
+def api_bench_get(bench_id: str) -> JSONResponse:
+    if not re.match(r"^bench_\d{8}_\d{6}$", bench_id):
+        raise HTTPException(status_code=404, detail="not found")
+    p = LOGS_DIR / f"{bench_id}.json"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="not found")
+    with open(p) as f:
+        return JSONResponse(json.load(f))
 
 # ---------------------------------------------------------------------------
 # Live control

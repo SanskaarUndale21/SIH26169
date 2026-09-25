@@ -23,6 +23,7 @@ import time
 from dataclasses import asdict
 from typing import List, Optional
 
+from algorithms import registry
 from control.run_loop import TrackingRunner
 from perception.frame_source import SimulatorFrameSource, VideoFileFrameSource
 from simulator.camera_model import CameraModel, PTZActuator
@@ -87,6 +88,8 @@ class LiveEngine:
               realtime: bool = True) -> dict:
         if self.is_running():
             raise RuntimeError("a run is already active, stop it first")
+        for slot in ("detector", "tracker", "controller"):
+            registry.get(registry.selection(config, slot)[0])  # fail fast on a missing plugin
 
         self._stop_flag = False
         self._error = None
@@ -128,6 +131,7 @@ class LiveEngine:
             "motion": None if video_path else config["target"].get("motion"),
             "num_targets": None if video_path else config["target"].get("num_targets", 1),
             "preset": config.get("scenario_preset"),
+            "algorithms": registry.describe_selection(config),
         }
 
         def on_telemetry(telemetry, frame):

@@ -131,7 +131,7 @@
 
 <script type="importmap">{ "imports": { "three": "/static/three.module.min.js" } }</script>
 <script type="module">
-import { SPEC, judge, fmt, api, toast, drawLine, drawLockRibbon, LOCK_NAMES, describeRun, runDate, overallVerdict } from "/static/app.js";
+import { SPEC, judge, fmt, api, toast, drawLine, drawLockRibbon, LOCK_NAMES, describeRun, describeAlgos, runDate, overallVerdict } from "/static/app.js";
 
 const $ = id => document.getElementById(id);
 let ws = null, status = null, lastRecord = null, lastImage = null, lastWorld = null, imgSize = [640, 480];
@@ -297,7 +297,7 @@ function onStatus(s) {
   status = s;
   renderSpec(s.metrics);
   const info = s.info || {};
-  $("desc").textContent = describeRun(info) + (info.realtime === false ? ", fast mode" : "");
+  $("desc").textContent = `${describeRun(info)}, ${describeAlgos(info.algorithms).toLowerCase().replace("default algorithms", "default algorithms")}` + (info.realtime === false ? ", fast mode" : "");
   if (s.error) toast("Engine error: " + s.error, true);
   if (!s.running && !finished && s.run_name) finish(s);
 }

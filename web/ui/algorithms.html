@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Algorithm Library</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  .lib { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
+  .list { position: sticky; top: 28px; display: grid; gap: 22px; }
+  .list h3 { font-size: 13px; color: var(--faint); font-weight: 600; margin: 0 0 6px 10px; }
+  .item { display: grid; gap: 2px; width: 100%; text-align: left; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid transparent; background: transparent; cursor: pointer; }
+  .item:hover { background: rgba(255,255,255,.04); }
+  .item[aria-current=true] { background: var(--deck); border-color: var(--rule-soft); }
+  .item .nm { font-weight: 600; font-size: 14px; }
+  .item .tags { display: flex; gap: 6px; }
+  .item .chip { font-size: 11.5px; padding: 1px 8px; }
+  .errors { border: 1px solid rgba(255,110,87,.45); background: var(--search-wash); border-radius: var(--r-lg); padding: 16px 20px; margin-bottom: 22px; }
+  .errors h3 { color: #ffb0a3; margin-bottom: 6px; }
+  pre.tb { white-space: pre-wrap; font: 12.5px/1.5 "JetBrains Mono", Consolas, monospace; color: #ffcfc6; margin: 8px 0 0; max-height: 220px; overflow: auto; }
+  .detail-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 14px; }
+  .detail-head .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .params { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 6px 0 4px; }
+  .params td, .params th { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); text-align: left; }
+  .params th { color: var(--faint); font-weight: 560; font-size: 12.5px; }
+  .code {
+    position: relative; display: grid; grid-template-columns: auto 1fr; background: #0a1226; border: 1px solid var(--rule-soft);
+    border-radius: var(--r-md); overflow: hidden; font: 13px/1.6 "JetBrains Mono", Consolas, monospace;
+  }
+  .code .gutter { padding: 14px 10px 14px 14px; text-align: right; color: #45527a; user-select: none; white-space: pre; overflow: hidden; }
+  .code pre, .code textarea { margin: 0; padding: 14px 16px 14px 6px; white-space: pre; overflow: auto; tab-size: 4; font: inherit; color: #d6dcf0; }
+  .code textarea { border: 0; outline: 0; resize: vertical; min-height: 460px; background: transparent; width: 100%; }
+  .code pre { max-height: 560px; }
+  .editor-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; justify-content: space-between; margin-bottom: 12px; }
+  .editor-bar .field { min-width: 240px; }
+  .check-out { margin-top: 16px; display: grid; gap: 12px; }
+  .check-card { border: 1px solid var(--rule-soft); border-radius: var(--r-md); padding: 14px 16px; background: var(--ink); }
+  .check-row { display: grid; grid-template-columns: 1.2fr repeat(4, minmax(0, 1fr)); gap: 10px; font-size: 13.5px; padding: 6px 0; align-items: center; font-variant-numeric: tabular-nums; }
+  .check-row .k { color: var(--faint); font-size: 12px; }
+  .pass-t { color: var(--lock); } .fail-t { color: var(--search); }
+  .slot-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0 18px; }
+  .slot-pick button { text-align: left; padding: 16px; border-radius: var(--r-lg); background: var(--ink); border: 1.5px solid var(--rule-soft); cursor: pointer; display: grid; gap: 6px; }
+  .slot-pick button[aria-pressed=true] { border-color: var(--beacon); background: var(--deck-2); }
+  .slot-pick strong { font-stretch: 110%; font-size: 15.5px; }
+  .slot-pick span { font-size: 13px; color: var(--dim); }
+  .contract { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--rule); margin-top: 8px; }
+  .contract > div { padding: 16px 18px 4px 0; }
+  .contract > div + div { padding-left: 18px; border-left: 1px solid var(--rule-soft); }
+  .contract code { font: 12.5px "JetBrains Mono", Consolas, monospace; color: var(--beacon); }
+  .contract p { color: var(--dim); font-size: 13.5px; margin: 6px 0 0; }
+  @media (max-width: 1000px) { .lib { grid-template-columns: 1fr; } .list { position: static; } .contract, .slot-pick { grid-template-columns: 1fr; } .contract > div + div { border-left: 0; padding-left: 0; } .check-row { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<!--SIDEBAR-->
+<main class="main">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Algorithms</h1>
+      <p class="lede">Swap in your own detector, tracker or pointing controller and test it on the same virtual camera,
+        disturbances and spec metrics as the built-in ones. Each algorithm is one Python class.</p>
+    </div>
+    <div class="actions">
+      <label class="btn" for="uploadFile">Upload .py file<input type="file" id="uploadFile" accept=".py" hidden></label>
+      <button class="btn primary" id="newBtn" type="button">Write a new algorithm</button>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:24px">
+    <h2>How your code plugs in</h2>
+    <p class="muted small" style="margin:2px 0 6px">Every frame runs these three stages in order. Replace any one; the others, the search pattern, lock logic and all scoring stay the same, so comparisons are fair.</p>
+    <div class="contract">
+      <div><h3>Detector</h3><code>detect(image) → [Detection(x, y, score)]</code>
+        <p>Gets the raw 8-bit camera frame. Returns every spot that might be the beacon.</p></div>
+      <div><h3>Tracker</h3><code>update(dt, measurement) → (x, y) | None</code>
+        <p>Gets the detection nearest its last estimate, or None when missed. Returns where the beacon is now.</p></div>
+      <div><h3>Controller</h3><code>compute(err_x°, err_y°, dt) → (pan°/s, tilt°/s)</code>
+        <p>Gets the estimate's offset from the image centre. Returns gimbal rates, clamped to the speed limits.</p></div>
+    </div>
+  </div>
+
+  <div id="errors"></div>
+
+  <div class="lib">
+    <nav class="list" id="list" aria-label="Algorithms"></nav>
+    <section class="panel" id="detail"><div class="empty">Loading algorithms</div></section>
+  </div>
+</main>
+</div>
+
+<script type="module">
+import { api, toast, fmt, SLOT_NAMES } from "/static/app.js";
+const $ = id => document.getElementById(id);
+let lib = { algorithms: [], errors: {} };
+let selected = null;
+let editing = null;   // {file, code, isNew}
+const SLOT_HELP = {
+  detector: "Finds beacon candidates in each camera frame.",
+  tracker: "Turns noisy, sometimes missing detections into a smooth position estimate.",
+  controller: "Drives pan and tilt so the beacon stays centred.",
+};
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function refresh(keep) {
+  lib = await api("/api/algorithms");
+  renderErrors(); renderList();
+  if (keep) {
+    const a = lib.algorithms.find(x => x.id === keep) || lib.algorithms.find(x => x.file === keep);
+    if (a) return select(a.id);
+  }
+}
+
+function renderErrors() {
+  const e = Object.entries(lib.errors);
+  $("errors").innerHTML = e.length ? `<div class="errors"><h3>${e.length === 1 ? "One file" : e.length + " files"} in user_algorithms could not be loaded</h3>
+    ${e.map(([f, tb]) => `<div style="margin-top:10px"><strong>${esc(f)}</strong>
+      <button class="btn quiet" type="button" data-fix="${esc(f)}" style="padding:4px 10px;margin-left:6px">Open and fix</button><pre class="tb">${esc(tb)}</pre></div>`).join("")}</div>` : "";
+  document.querySelectorAll("[data-fix]").forEach(b => b.onclick = async () => {
+    const src = await api(`/api/algorithms/source?file=${encodeURIComponent(b.dataset.fix)}`);
+    openEditor({ file: src.file, code: src.code, isNew: false });
+  });
+}
+
+function renderList() {
+  $("list").innerHTML = Object.keys(SLOT_NAMES).map(slot => {
+    const items = lib.algorithms.filter(a => a.slot === slot);
+    return `<div><h3>${SLOT_NAMES[slot]}s</h3>${items.map(a => `
+      <button class="item" type="button" data-id="${esc(a.id)}" aria-current="${selected === a.id}">
+        <span class="nm">${esc(a.name)}</span>
+        <span class="tags">${a.source === "user" ? '<span class="chip beacon">Yours</span>' : '<span class="chip">Built-in</span>'}
+          ${a.default ? '<span class="chip pass">Default</span>' : ""}</span></button>`).join("")}</div>`;
+  }).join("");
+  document.querySelectorAll(".item").forEach(b => b.onclick = () => select(b.dataset.id));
+}
+
+async function select(id) {
+  if (editing && !confirmLeave()) return;
+  editing = null;
+  selected = id; renderList();
+  const a = lib.algorithms.find(x => x.id === id);
+  const src = await api(`/api/algorithms/source?id=${encodeURIComponent(id)}`);
+  const params = Object.entries(a.params);
+  $("detail").innerHTML = `
+    <div class="detail-head">
+      <div><span class="muted small">${SLOT_NAMES[a.slot]}${a.file ? `, user_algorithms/${esc(a.file)}` : ", built in"}</span>
+        <h2 style="font-size:22px;margin-top:4px">${esc(a.name)}</h2>
+        <p class="muted" style="margin:4px 0 0;max-width:62ch">${esc(a.description) || "No description."}</p></div>
+      <div class="acts">
+        <a class="btn primary" href="/compare?slot=${a.slot}&id=${encodeURIComponent(a.id)}">Compare with default</a>
+        <a class="btn" href="/setup?step=tracking&${a.slot}=${encodeURIComponent(a.id)}">Use in a run</a>
+        ${src.editable ? `<button class="btn" type="button" id="editBtn">Edit</button><button class="btn danger" type="button" id="delBtn">Delete</button>` : ""}
+      </div>
+    </div>
+    ${params.length ? `<h3 style="margin-top:10px">Parameters</h3><table class="params"><thead><tr><th>Name</th><th>Default</th><th>Range</th><th>Meaning</th></tr></thead><tbody>
+      ${params.map(([k, p]) => `<tr><td>${esc(p.label)}</td><td class="num">${esc(p.default)}</td><td class="num faint">${p.min != null ? `${p.min} to ${p.max}` : ""}</td><td class="muted">${esc(p.help || "")}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="small faint">No parameters of its own${a.source === "builtin" && a.default ? "; tuned in the New run page's tracking step." : "."}</p>`}
+    <h3 style="margin:18px 0 8px">Source</h3>
+    <div class="code"><div class="gutter">${src.code.split("\n").map((_, i) => i + 1).join("\n")}</div><pre>${esc(src.code)}</pre></div>`;
+  if (src.editable) {
+    $("editBtn").onclick = () => openEditor({ file: src.file, code: src.code, isNew: false });
+    $("delBtn").onclick = async () => {
+      if (!confirm(`Delete user_algorithms/${src.file}? Every algorithm in that file is removed.`)) return;
+      try { await api(`/api/algorithms/file/${encodeURIComponent(src.file)}`, { method: "DELETE" }); toast(`Deleted ${src.file}.`); selected = null; await refresh(); showWelcome(); }
+      catch (e) { toast(e.message, true); }
+    };
+  }
+}
+
+function confirmLeave() { return confirm("Discard unsaved changes in the editor?"); }
+
+function showWelcome() {
+  $("detail").innerHTML = `<div class="empty"><h3>Pick an algorithm to read it, or write your own</h3>
+    <p>Start from a template, check it on two quick scenarios, save it, then compare it against the default.</p>
+    <button class="btn primary" type="button" id="wNew">Write a new algorithm</button></div>`;
+  $("wNew").onclick = newFlow;
+}
+
+// ---------- new ----------
+function newFlow() {
+  if (editing && !confirmLeave()) return;
+  editing = null; selected = null; renderList();
+  let slot = "detector";
+  $("detail").innerHTML = `<h2 style="font-size:22px">New algorithm</h2>
+    <p class="muted" style="margin:4px 0 0">Which stage does it replace?</p>
+    <div class="slot-pick">${Object.keys(SLOT_NAMES).map(s => `<button type="button" data-slot="${s}" aria-pressed="${s === slot}">
+      <strong>${SLOT_NAMES[s]}</strong><span>${SLOT_HELP[s]}</span></button>`).join("")}</div>
+    <div class="field" style="max-width:420px"><label class="field-label" for="newName">Name</label>
+      <input type="text" id="newName" value="My detector" maxlength="60"></div>
+    <div style="margin-top:20px"><button class="btn primary" type="button" id="makeBtn">Open template</button></div>`;
+  document.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => {
+    slot = b.dataset.slot;
+    document.querySelectorAll("[data-slot]").forEach(x => x.setAttribute("aria-pressed", x === b));
+    const n = $("newName"); if (/^My (detector|tracker|controller)$/.test(n.value)) n.value = `My ${slot}`;
+  });
+  $("makeBtn").onclick = async () => {
+    const t = await api(`/api/algorithms/template?slot=${slot}&title=${encodeURIComponent($("newName").value || "My algorithm")}`);
+    openEditor({ file: t.file, code: t.code, isNew: true });
+  };
+}
+$("newBtn").onclick = newFlow;
+
+// ---------- editor ----------
+function openEditor(e) {
+  editing = e; selected = null; renderList();
+  $("detail").innerHTML = `
+    <div class="editor-bar">
+      <div class="field"><label class="field-label" for="fname">File in user_algorithms/</label>
+        <input type="text" id="fname" value="${esc(e.file)}" spellcheck="false" ${e.isNew ? "" : "readonly"}></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn quiet" type="button" id="cancelBtn">Cancel</button>
+        <button class="btn" type="button" id="checkBtn">Check</button>
+        <button class="btn primary" type="button" id="saveBtn">Save</button>
+      </div>
+    </div>
+    <div class="code"><div class="gutter" id="gut"></div><textarea id="src" spellcheck="false" aria-label="Algorithm source code">${esc(e.code)}</textarea></div>
+    <p class="small faint" style="margin-top:8px">Tab indents. Ctrl+S saves. Check runs each class in the file through 6 s of the spec-default and heavy-noise scenarios.</p>
+    <div class="check-out" id="checkOut"></div>`;
+  const ta = $("src"), gut = $("gut");
+  const lines = () => { gut.textContent = ta.value.split("\n").map((_, i) => i + 1).join("\n"); };
+  lines();
+  ta.addEventListener("input", () => { editing.code = ta.value; lines(); });
+  ta.addEventListener("scroll", () => { gut.scrollTop = ta.scrollTop; });
+  ta.addEventListener("keydown", ev => {
+    if (ev.key === "Tab") {
+      ev.preventDefault();
+      const s = ta.selectionStart, en = ta.selectionEnd;
+      ta.setRangeText("    ", s, en, "end"); editing.code = ta.value; lines();
+    } else if ((ev.ctrlKey || ev.metaKey) && ev.key === "s") { ev.preventDefault(); save(); }
+  });
+  $("cancelBtn").onclick = () => { editing = null; showWelcome(); };
+  $("checkBtn").onclick = check;
+  $("saveBtn").onclick = save;
+  ta.focus();
+}
+
+async function check() {
+  const out = $("checkOut"), btn = $("checkBtn");
+  btn.disabled = true; btn.textContent = "Checking";
+  out.innerHTML = `<div class="check-card muted">Running your code on two short scenarios. This takes a few seconds.</div>`;
+  try {
+    const r = await api("/api/algorithms/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: $("src").value }) });
+    if (r.error) { out.innerHTML = `<div class="check-card"><h3 class="fail-t">Could not load the file</h3><pre class="tb">${esc(r.error)}</pre></div>`; return; }
+    out.innerHTML = r.algorithms.map(a => `<div class="check-card">
+      <h3>${esc(a.name)} <span class="chip ${a.runs.every(x => !x.error) ? "pass" : "fail"}" style="margin-left:6px">${SLOT_NAMES[a.slot]}</span></h3>
+      <div class="check-row"><span class="k">Scenario</span><span class="k">Acquisition</span><span class="k">Avg error</span><span class="k">Target loss</span><span class="k">Processing</span></div>
+      ${a.runs.map(run => run.error ? `<div><strong>${esc(run.scenario)}</strong><pre class="tb">${esc(run.error)}</pre></div>` : (() => {
+        const m = run.metrics, v = run.verdicts, c = ok => ok === false ? "fail-t" : ok ? "pass-t" : "";
+        return `<div class="check-row"><span>${esc(run.scenario)}</span>
+          <span class="${c(v.acquisition_time_sec)}">${m.acquisition_time_sec == null ? "never locked" : fmt(m.acquisition_time_sec) + " s"}</span>
+          <span class="${c(v.avg_tracking_error_px)}">${fmt(m.avg_tracking_error_px)} px</span>
+          <span class="${c(v.target_loss_pct)}">${fmt(m.target_loss_pct, 1)} %</span>
+          <span class="${c(v.processing_fps)}">${fmt(m.processing_fps, 0)} FPS</span></div>`;
+      })()).join("")}</div>`).join("");
+    toast(r.ok ? "Check passed. Save it to use it." : "Check found a problem. See the details below.", !r.ok);
+  } catch (e) { out.innerHTML = `<div class="check-card fail-t">${esc(e.message)}</div>`; }
+  finally { btn.disabled = false; btn.textContent = "Check"; }
+}
+
+async function save() {
+  const file = $("fname").value.trim().toLowerCase();
+  try {
+    const r = await api("/api/algorithms/save", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, code: $("src").value, overwrite: !editing.isNew }) });
+    editing = null;
+    lib = r; renderErrors(); renderList();
+    if (r.error) { toast(`Saved ${file}, but it failed to load. See the error above.`, true); return; }
+    toast(`Saved ${file}. It is now available in New run and Compare.`);
+    const first = r.algorithms.find(a => a.file === file);
+    if (first) select(first.id);
+  } catch (e) {
+    if (/already exists/.test(e.message)) toast(`${file} already exists. Pick another file name.`, true);
+    else toast(e.message, true);
+  }
+}
+
+$("uploadFile").addEventListener("change", async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  const form = new FormData(); form.append("file", f);
+  let url = "/api/algorithms/upload";
+  try {
+    let r;
+    try { r = await api(url, { method: "POST", body: form }); }
+    catch (e) {
+      if (!/already exists/.test(e.message) || !confirm(`${f.name} already exists. Replace it?`)) throw e;
+      const form2 = new FormData(); form2.append("file", f);
+      r = await api(url + "?overwrite=true", { method: "POST", body: form2 });
+    }
+    lib = r; renderErrors(); renderList();
+    if (r.error) toast(`Uploaded ${r.file}, but it failed to load. See the error above.`, true);
+    else { toast(`Uploaded ${r.file}.`); const a = r.algorithms.find(x => x.file === r.file); if (a) select(a.id); }
+  } catch (e) { toast(e.message, true); }
+  ev.target.value = "";
+});
+
+addEventListener("beforeunload", e => { if (editing) { e.preventDefault(); e.returnValue = ""; } });
+
+(async () => {
+  await refresh();
+  const want = new URLSearchParams(location.search).get("id");
+  if (want && lib.algorithms.some(a => a.id === want)) select(want); else showWelcome();
+})();
+</script>
+</body>
+</html>

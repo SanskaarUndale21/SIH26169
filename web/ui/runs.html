@@ -51,7 +51,7 @@
 </main>
 </div>
 <script type="module">
-import { SPEC, judge, fmt, api, runDate, describeRun, overallVerdict } from "/static/app.js";
+import { SPEC, judge, fmt, api, runDate, describeRun, describeAlgos, overallVerdict } from "/static/app.js";
 let runs = [], filter = "all";
 const specBy = Object.fromEntries(SPEC.map(s => [s.key, s]));
 
@@ -80,7 +80,7 @@ function render() {
     const m = r.metrics, v = overallVerdict(m);
     return `<tr class="clickable" data-name="${r.name}" tabindex="0">
       <td>${runDate(r.name)}<span class="sub">${fmt(m.simulation_duration_sec, 1)} s long</span></td>
-      <td>${describeRun(r.info)}</td>
+      <td>${describeRun(r.info)}<span class="sub">${describeAlgos(r.info && r.info.algorithms)}</span></td>
       ${cell("acquisition", m)}${cell("error", m)}${cell("loss", m, 1, "hide-sm")}${cell("reacq", m, 2, "hide-sm")}${cell("fps", m, 0, "hide-sm")}
       <td><span class="chip ${v}">${v === "pass" ? "Pass" : "Fail"}</span></td></tr>`;
   }).join("");

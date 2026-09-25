@@ -148,8 +148,8 @@
       </section>
 
       <section class="step-panel" data-step="tracking">
-        <div class="step-intro"><h2>Tracking and control</h2>
-          <p class="muted">The defaults are tuned to meet the spec. Change these only to study how the tracker responds.</p></div>
+        <div class="step-intro"><h2>Algorithms</h2>
+          <p class="muted">Choose what detects, tracks and points. The defaults are tuned to meet the spec; your own plugins from the <a href="/algorithms">Algorithms</a> page appear here too.</p></div>
         <div id="f-tracking"></div>
       </section>
 
@@ -181,14 +181,14 @@
 </div>
 
 <script type="module">
-import { api, toast, MOTION_NAMES } from "/static/app.js";
+import { api, toast, MOTION_NAMES, SLOT_NAMES } from "/static/app.js";
 
 const STEPS = [
   { id: "source", title: "Source", desc: "Scene or video" },
   { id: "camera", title: "Scene and camera", desc: "Sensor and gimbal", groups: ["Scene", "Camera", "PTZ"] },
   { id: "target", title: "Beacon", desc: "Shape and motion", groups: ["Target", "Scenario Preset"] },
   { id: "disturb", title: "Disturbances", desc: "Noise and weather", groups: ["Noise", "Jitter", "Atmosphere", "Turbulence", "Platform Motion"] },
-  { id: "tracking", title: "Tracking", desc: "Advanced tuning", groups: ["Detector", "IMM Tracker", "PID Control", "Link Budget"] },
+  { id: "tracking", title: "Algorithms", desc: "Detect, track, point", groups: ["Algorithms", "Detector", "IMM Tracker", "PID Control", "Link Budget"] },
 ];
 const MOTION_GROUP = {
   straight_line: "Motion: Straight Line", circular: "Motion: Circular", figure8: "Motion: Figure-8",
@@ -205,27 +205,10 @@ const GROUP_NOTES = {
   Turbulence: "Heavy to compute: expect lower frame rates while it is on.",
 };
 
-const PRESETS = [
-  { id: "default", title: "Spec defaults", desc: "Straight line, clear sky, no noise", values: {} },
-  { id: "noise", title: "Heavy sensor noise", desc: "Salt and pepper 10%, Gaussian σ 20, Poisson", values: {
-    "disturbances/noise/salt_pepper/enabled": true, "disturbances/noise/salt_pepper/amount": 0.10,
-    "disturbances/noise/gaussian/enabled": true, "disturbances/noise/gaussian/sigma": 20,
-    "disturbances/noise/poisson/enabled": true } },
-  { id: "weather", title: "Fog and shake", desc: "Fog, camera jitter ±10 px, circular path", values: {
-    "disturbances/atmosphere/mode": "fog", "disturbances/jitter/enabled": true, "disturbances/jitter/max_px": 10,
-    "target/motion": "circular" } },
-  { id: "platform", title: "Moving platform", desc: "Figure of 8 beacon, circular platform drift", values: {
-    "target/motion": "figure8", "disturbances/platform_motion/enabled": true,
-    "disturbances/platform_motion/mode": "circular", "disturbances/platform_motion/max_px_frame": 5 } },
-  { id: "night", title: "Low light, random walk", desc: "Dim scene, erratic beacon, Gaussian σ 10", values: {
-    "disturbances/atmosphere/mode": "low_light", "target/motion": "random",
-    "disturbances/noise/gaussian/enabled": true, "disturbances/noise/gaussian/sigma": 10 } },
-  { id: "leo", title: "LEO crosslink", desc: "Orbit-derived motion between two satellites", values: {
-    "scenario_preset": "leo_leo_crosslink" } },
-];
+let PRESETS = [];  // loaded from /api/scenarios (config/scenarios.py), shared with Compare
 
 const STORE_KEY = "fsoc-setup-v2";
-let schema, byKey = {}, values = {}, defaults = {};
+let schema, byKey = {}, values = {}, defaults = {}, algoList = [];
 let source = "simulator", videoPath = null, videoName = null, current = 0, activePreset = "default";
 
 const keyOf = p => p.path.join("/");
@@ -239,7 +222,7 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
     if (!s) return;
-    for (const k in s.values) if (k in byKey) values[k] = s.values[k];
+    for (const k in s.values) if (k in byKey || k.startsWith("algorithms/")) values[k] = s.values[k];
     if (s.source) source = s.source;
     if (typeof s.realtime === "boolean") realtimeEl.checked = s.realtime;
     activePreset = s.activePreset || "default";
@@ -358,6 +341,13 @@ function renderSteps() {
     const host = document.getElementById(id);
     host.innerHTML = "";
     for (const g of groups) {
+      if (g === "Algorithms") { host.appendChild(algoBlock()); continue; }
+      if (g === "Detector" && values["algorithms/detector/id"] !== "dog") continue;
+      if (g === "PID Control" && values["algorithms/controller/id"] !== "pid") continue;
+      if (g === "IMM Tracker" && values["algorithms/tracker/id"] !== "imm") {
+        const lockOnly = byGroup[g].filter(p => /confirm_frames|reacquire_timeout/.test(keyOf(p)));
+        const el = groupBlock(g, lockOnly); el.querySelector("h3").textContent = "Lock logic"; host.appendChild(el); continue;
+      }
       if (g === "Target") {
         host.appendChild(groupBlock("Target", byGroup.Target.filter(p => keyOf(p) !== "target/motion")));
         host.appendChild(motionBlock());
@@ -367,6 +357,45 @@ function renderSteps() {
     }
   };
   for (const s of STEPS) if (s.groups) fill("f-" + s.id, s.groups);
+}
+
+// ---------- algorithm pickers ----------
+function algoBlock() {
+  const sec = document.createElement("div");
+  sec.className = "group";
+  sec.innerHTML = `<h3>Algorithms</h3>`;
+  for (const slot of Object.keys(SLOT_NAMES)) {
+    const key = `algorithms/${slot}/id`;
+    const opts = algoList.filter(a => a.slot === slot);
+    if (!opts.some(a => a.id === values[key])) values[key] = opts.find(a => a.default)?.id || opts[0]?.id;
+    const cur = opts.find(a => a.id === values[key]);
+    const block = document.createElement("div");
+    block.className = "sub-block";
+    block.innerHTML = `<div class="field"><label class="field-label" for="alg-${slot}"><span>${SLOT_NAMES[slot]}</span>
+        ${cur && cur.source === "user" ? `<span class="chip beacon">Yours</span>` : ""}</label>
+      <select id="alg-${slot}">${opts.map(a => `<option value="${a.id}" ${a.id === values[key] ? "selected" : ""}>${a.name}${a.source === "user" ? " (yours)" : ""}</option>`).join("")}</select>
+      <span class="field-help">${cur ? cur.description : ""}</span></div>`;
+    block.querySelector("select").addEventListener("change", e => {
+      for (const k of Object.keys(values)) if (k.startsWith(`algorithms/${slot}/params/`)) delete values[k];
+      set(key, e.target.value);
+      renderSteps();
+    });
+    const params = cur ? Object.entries(cur.params) : [];
+    if (params.length) {
+      const f = document.createElement("div");
+      f.className = "fields";
+      for (const [name, spec] of params) {
+        const pk = `algorithms/${slot}/params/${name}`;
+        if (!(pk in values)) values[pk] = spec.default;
+        const kind = spec.kind === "text" ? "text" : spec.kind;
+        f.appendChild(fieldFor({ path: pk.split("/"), label: spec.label, kind, min: spec.min ?? 0, max: spec.max ?? Math.max(1, Number(spec.default) * 4 || 100),
+          step: spec.step ?? (kind === "int" ? 1 : 0.01), unit: "", help: spec.help || "", options: null }));
+      }
+      block.appendChild(f);
+    }
+    sec.appendChild(block);
+  }
+  return sec;
 }
 
 // ---------- state ----------
@@ -454,15 +483,19 @@ function markPreset() {
   document.querySelectorAll(".preset").forEach(b => b.setAttribute("aria-pressed", b.dataset.id === activePreset));
 }
 function applyPreset(p) {
-  values = { ...defaults, ...p.values };
+  // keep the chosen algorithms; scenarios only describe the world
+  const keepAlgos = Object.fromEntries(Object.entries(values).filter(([k]) => k.startsWith("algorithms/")));
+  values = { ...defaults, ...keepAlgos, ...p.values };
   activePreset = p.id;
   renderSteps(); markPreset(); save(); renderSummary(); preview();
   toast(`Loaded “${p.title}”.`);
 }
-document.getElementById("presets").innerHTML = PRESETS.map(p =>
-  `<button type="button" class="preset" data-id="${p.id}"><strong>${p.title}</strong><span>${p.desc}</span></button>`).join("");
-document.querySelectorAll(".preset").forEach(b => b.addEventListener("click", () => applyPreset(PRESETS.find(p => p.id === b.dataset.id))));
-document.getElementById("resetBtn").onclick = () => applyPreset(PRESETS[0]);
+function renderPresets() {
+  document.getElementById("presets").innerHTML = PRESETS.map(p =>
+    `<button type="button" class="preset" data-id="${p.id}"><strong>${p.title}</strong><span>${p.desc}</span></button>`).join("");
+  document.querySelectorAll(".preset").forEach(b => b.addEventListener("click", () => applyPreset(PRESETS.find(p => p.id === b.dataset.id))));
+}
+document.getElementById("resetBtn").onclick = () => { values = { ...defaults }; applyPreset(PRESETS[0]); };
 
 // ---------- preview ----------
 let previewSeq = 0, lastPreview = null;
@@ -539,6 +572,9 @@ function renderSummary() {
     if (values["disturbances/platform_motion/enabled"]) dist.push("platform drift");
     rows.push(["Disturbances", dist.length ? dist.join(", ") : "None"]);
   }
+  const custom = Object.keys(SLOT_NAMES).filter(sl => { const a = algoList.find(x => x.id === values[`algorithms/${sl}/id`]); return a && !a.default; })
+    .map(sl => algoList.find(x => x.id === values[`algorithms/${sl}/id`]).name);
+  rows.push(["Algorithms", custom.length ? custom.join(", ") : "Defaults"]);
   rows.push(["Timing", realtimeEl.checked ? "Real time" : "As fast as possible"]);
   document.getElementById("summary").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
 }
@@ -563,11 +599,16 @@ document.getElementById("startTop").onclick = start;
 
 // ---------- boot ----------
 (async () => {
-  schema = await api("/api/config/schema");
+  [schema, algoList, PRESETS] = await Promise.all([api("/api/config/schema"), api("/api/algorithms").then(r => r.algorithms), api("/api/scenarios")]);
+  renderPresets();
   for (const p of schema.params) { byKey[keyOf(p)] = p; defaults[keyOf(p)] = p.default; }
   values = { ...defaults };
   load();
   if (qs.get("source") === "video") source = "video";
+  for (const slot of Object.keys(SLOT_NAMES)) {
+    const id = qs.get(slot);
+    if (id && algoList.some(a => a.id === id && a.slot === slot)) values[`algorithms/${slot}/id`] = id;
+  }
   renderSteps();
   markPreset();
   setSource(source);

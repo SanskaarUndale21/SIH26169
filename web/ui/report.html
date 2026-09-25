@@ -91,7 +91,7 @@
 </div>
 <script type="importmap">{ "imports": { "three": "/static/three.module.min.js" } }</script>
 <script type="module">
-import { SPEC, readoutHTML, fmt, api, runDate, describeRun, overallVerdict, drawLine, drawLockRibbon, LOCK_NAMES, MOTION_NAMES } from "/static/app.js";
+import { SPEC, readoutHTML, fmt, api, runDate, describeRun, describeAlgos, overallVerdict, drawLine, drawLockRibbon, LOCK_NAMES, MOTION_NAMES, SLOT_NAMES } from "/static/app.js";
 const NAME = "__RUN_NAME__";
 const $ = id => document.getElementById(id);
 let frames = [], run;
@@ -187,6 +187,7 @@ function renderScenario(d) {
     ["Gimbal limits", `${c.ptz.max_pan_speed_deg_s}°/s pan, ${c.ptz.max_tilt_speed_deg_s}°/s tilt`],
     ["Disturbances", list.length ? list.join(", ") : "None"],
     ["Timing", info && info.realtime === false ? "As fast as possible" : "Real time"],
+    ...(info && info.algorithms ? Object.entries(info.algorithms).map(([slot, a]) => [SLOT_NAMES[slot], a.name]) : []),
   ];
   $("scenario").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
 }
@@ -222,7 +223,7 @@ async function setupReplay() {
   const m = run.metrics, v = overallVerdict(m);
   document.title = `Run Report ${runDate(NAME)}`;
   $("title").textContent = runDate(NAME);
-  $("meta").innerHTML = `<span>${describeRun(run.info)}</span><span class="chip ${v}">${v === "pass" ? "Meets every spec target" : "Misses at least one spec target"}</span>`;
+  $("meta").innerHTML = `<span>${describeRun(run.info)}</span><span class="muted">${describeAlgos(run.info && run.info.algorithms)}</span><span class="chip ${v}">${v === "pass" ? "Meets every spec target" : "Misses at least one spec target"}</span>`;
   const enc = encodeURIComponent(NAME);
   $("downloads").innerHTML = `
     <a class="btn" href="/api/runs/${enc}/download/json">Performance log (JSON)</a>

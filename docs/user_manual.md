@@ -93,6 +93,8 @@ and missing from the other. Groups, by tab:
 - **IMM Tracker**: per-model (CV/CT/random-walk) process noise,
   measurement noise, lock-confirm frame count, re-acquire timeout.
 - **PID Control**: pan/tilt Kp/Ki/Kd.
+- **Algorithms**: which detector, tracker and pointing controller run.
+  Built-ins plus any plugin in `user_algorithms/` (docs/algorithm_guide.md).
 
 ## 4. Running a simulation scenario (desktop GUI)
 
@@ -198,6 +200,14 @@ on phones):
   performance log as JSON or CSV, and the per-frame **centroid log (CSV)**
   with detected centroid, tracker estimate, truth and centroiding error
   for every frame. **Print** gives a clean paper copy.
+- **Algorithms** (`/algorithms`): every detector, tracker and pointing
+  controller available, built in or yours, with its parameters and
+  source. Write a new one from a template, upload a `.py`, **Check** it on
+  two short scenarios, and save it. Full guide: `docs/algorithm_guide.md`.
+- **Compare** (`/compare`): two to four algorithm sets, a set of scenarios,
+  repeats and run length. Every set sees identical seeded runs; results
+  show pass rates against the spec, means and worst cases, a per-scenario
+  error chart and pass matrix, and are saved for later.
 - **Spec check** (`/spec`): every requirement from the problem statement,
   what the system does about it, and the latest measured performance.
 
