@@ -20,12 +20,15 @@ target:
   shape: square        # square | circle
   size_px: [10, 10]
   initial_location: random   # random | [x, y]
-  motion: straight_line       # straight_line | circular | figure8 | random
+  motion: straight_line       # straight_line | circular | figure8 | random | spiral | sinusoidal | user_defined
   motion_params:
     straight_line: {speed_px_s: 60, angle_deg: 30}
     circular: {radius_px: 300, period_s: 20}
     figure8: {A_px: 300, B_px: 200, period_s: 24}
     random: {speed_px_s: 30, theta_std_deg: 25}
+    spiral: {r0_px: 20, k_px_s: 15, period_s: 6}
+    sinusoidal: {speed_px_s: 50, angle_deg: 0, amplitude_px: 120, period_s: 8}
+    user_defined: {waypoints: "0,0; 150,0; 150,150; 0,150", speed_px_s: 60}
 
 ptz:
   max_pan_speed_deg_s: 5.0
@@ -47,6 +50,7 @@ disturbances:
                            # of flat noise)
   atmosphere:
     mode: clear   # clear | haze | fog | rain | low_light
+    strength: 1.0 # scales contrast/brightness reduction: 0 none, 1 preset, 2 double
   turbulence:
     enabled: false
     r0: 0.05               # used directly unless physical: true
@@ -58,7 +62,7 @@ disturbances:
   platform_motion:
     enabled: false
     mode: linear   # linear | circular | random | spiral | figure8
-    max_px_frame: 20
+    max_px_frame: 5   # camera px per frame; spec allows up to +-20
 
 # Link-budget context for the tracking-error numbers: translates pixel
 # error into what it actually costs the FSOC link (see

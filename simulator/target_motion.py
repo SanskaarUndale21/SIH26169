@@ -1,4 +1,6 @@
-"""Target motion models: straight line, circular, figure-of-8, random walk.
+"""Target motion models: straight line, circular, figure-of-8, random walk
+(the four mandatory ones) plus the spec's optional spiral, sinusoidal and
+user-defined waypoint paths.
 
 Each model is parametrized by time t (seconds since simulation start) and
 returns a world-frame (x, y) pixel position. Straight-line motion reflects
@@ -9,7 +11,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Protocol, Tuple
+from typing import List, Protocol, Tuple
 
 
 class MotionModel(Protocol):
@@ -154,6 +156,88 @@ class SpiralMotion:
         return _clamp(x, self.width), _clamp(y, self.height)
 
 
+@dataclass
+class SinusoidalMotion:
+    """Travels along a heading at constant speed while oscillating
+    sideways (perpendicular to the heading): a weaving path. Reflects off
+    the screen bounds like StraightLineMotion so it never leaves the world."""
+    x0: float
+    y0: float
+    width: int
+    height: int
+    speed_px_s: float = 50.0
+    angle_deg: float = 0.0
+    amplitude_px: float = 120.0
+    period_s: float = 8.0
+
+    def position(self, t: float) -> Tuple[float, float]:
+        a = math.radians(self.angle_deg)
+        along = self.speed_px_s * t
+        side = self.amplitude_px * math.sin(2 * math.pi * t / self.period_s)
+        x = self.x0 + along * math.cos(a) - side * math.sin(a)
+        y = self.y0 + along * math.sin(a) + side * math.cos(a)
+        return _reflect(x, self.width), _reflect(y, self.height)
+
+
+def parse_waypoints(text) -> List[Tuple[float, float]]:
+    """"dx,dy; dx,dy; ..." (offsets from the spawn point, world px) ->
+    list of tuples. Accepts an already-parsed list too, so YAML configs
+    can give a real list instead of a string."""
+    if isinstance(text, (list, tuple)):
+        return [(float(p[0]), float(p[1])) for p in text]
+    pts = []
+    for chunk in str(text).replace("\n", ";").split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.replace(" ", ",").split(",")
+        parts = [p for p in parts if p]
+        if len(parts) != 2:
+            raise ValueError(f"waypoint '{chunk}' must be 'dx,dy'")
+        pts.append((float(parts[0]), float(parts[1])))
+    return pts
+
+
+@dataclass
+class UserDefinedMotion:
+    """User-drawn path: visits waypoints (offsets from the spawn point)
+    in order at constant speed, then loops back to the start."""
+    x0: float
+    y0: float
+    width: int
+    height: int
+    waypoints: str = "0,0; 150,0; 150,150; 0,150"
+    speed_px_s: float = 60.0
+    _pts: list = None
+    _cum: list = None
+
+    def __post_init__(self):
+        offs = parse_waypoints(self.waypoints) or [(0.0, 0.0)]
+        if offs[0] != (0.0, 0.0):
+            offs = [(0.0, 0.0)] + offs
+        pts = [(self.x0 + dx, self.y0 + dy) for dx, dy in offs]
+        pts.append(pts[0])  # closed loop
+        self._pts = pts
+        self._cum = [0.0]
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            self._cum.append(self._cum[-1] + math.hypot(bx - ax, by - ay))
+
+    def position(self, t: float) -> Tuple[float, float]:
+        total = self._cum[-1]
+        if total <= 0 or self.speed_px_s <= 0:
+            x, y = self._pts[0]
+            return _clamp(x, self.width), _clamp(y, self.height)
+        s = (self.speed_px_s * t) % total
+        for i in range(len(self._pts) - 1):
+            if s <= self._cum[i + 1]:
+                seg = self._cum[i + 1] - self._cum[i]
+                f = (s - self._cum[i]) / seg if seg > 0 else 0.0
+                (ax, ay), (bx, by) = self._pts[i], self._pts[i + 1]
+                return _clamp(ax + f * (bx - ax), self.width), _clamp(ay + f * (by - ay), self.height)
+        x, y = self._pts[-1]
+        return _clamp(x, self.width), _clamp(y, self.height)
+
+
 def _clamp(v: float, limit: float) -> float:
     return min(max(v, 0), limit)
 
@@ -171,4 +255,8 @@ def make_motion_model(kind: str, x0: float, y0: float, width: int, height: int,
         return RandomWalkMotion(x0, y0, width, height, **p)
     if kind == "spiral":
         return SpiralMotion(x0, y0, width, height, **p)
+    if kind == "sinusoidal":
+        return SinusoidalMotion(x0, y0, width, height, **p)
+    if kind == "user_defined":
+        return UserDefinedMotion(x0, y0, width, height, **p)
     raise ValueError(f"unknown motion model: {kind}")

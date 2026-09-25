@@ -12,7 +12,7 @@ Each entry:
               ("camera", "fov_deg", 0) means cfg["camera"]["fov_deg"][0]
   label     : human-readable name shown in both UIs
   group     : which section/tab this belongs to
-  kind      : "int" | "float" | "bool" | "enum"
+  kind      : "int" | "float" | "bool" | "enum" | "text"
   min/max/step : for int/float (defines the slider + spinbox range)
   options   : for enum, list of (value, display_label) pairs
   unit      : optional unit string shown next to the value
@@ -30,7 +30,7 @@ class Param:
     path: Tuple
     label: str
     group: str
-    kind: str  # int | float | bool | enum
+    kind: str  # int | float | bool | enum | text
     default: Any
     min: Optional[float] = None
     max: Optional[float] = None
@@ -65,12 +65,14 @@ PARAM_SCHEMA: List[Param] = [
           help="Multiple targets are optional per spec; the tracker follows whichever is nearest its prediction"),
     Param(("target", "shape"), "Shape", "Target", "enum", "square",
           options=[("square", "Square"), ("circle", "Circle")]),
-    Param(("target", "size_px", 0), "Size", "Target", "int", 10, 5, 20, 1, unit="px"),
+    Param(("target", "size_px", 0), "Width", "Target", "int", 10, 5, 20, 1, unit="px"),
+    Param(("target", "size_px", 1), "Height", "Target", "int", 10, 5, 20, 1, unit="px"),
     Param(("target", "initial_location"), "Initial location", "Target", "enum", "random",
           options=[("random", "Random"), ("fixed_center", "Fixed (screen centre)")]),
     Param(("target", "motion"), "Motion type", "Target", "enum", "straight_line",
           options=[("straight_line", "Straight line"), ("circular", "Circular"),
-                    ("figure8", "Figure-8"), ("random", "Random walk"), ("spiral", "Spiral")]),
+                    ("figure8", "Figure-8"), ("random", "Random walk"), ("spiral", "Spiral"),
+                    ("sinusoidal", "Sinusoidal"), ("user_defined", "User-defined path")]),
 
     # --- Target motion parameters (all four kept live; only the active
     # motion type's set is actually used, per Scene.from_config) ---
@@ -95,6 +97,28 @@ PARAM_SCHEMA: List[Param] = [
           "float", 30.0, 0.0, 300.0, 1.0, unit="px/s"),
     Param(("target", "motion_params", "random", "theta_std_deg"), "Heading std. dev.", "Motion: Random Walk",
           "float", 25.0, 0.0, 90.0, 1.0, unit="deg"),
+
+    Param(("target", "motion_params", "spiral", "r0_px"), "Start radius", "Motion: Spiral",
+          "float", 20.0, 0.0, 400.0, 5.0, unit="px"),
+    Param(("target", "motion_params", "spiral", "k_px_s"), "Radius growth", "Motion: Spiral",
+          "float", 15.0, 0.0, 100.0, 1.0, unit="px/s"),
+    Param(("target", "motion_params", "spiral", "period_s"), "Period", "Motion: Spiral",
+          "float", 6.0, 1.0, 60.0, 0.5, unit="s"),
+
+    Param(("target", "motion_params", "sinusoidal", "speed_px_s"), "Forward speed", "Motion: Sinusoidal",
+          "float", 50.0, 0.0, 300.0, 1.0, unit="px/s"),
+    Param(("target", "motion_params", "sinusoidal", "angle_deg"), "Heading angle", "Motion: Sinusoidal",
+          "float", 0.0, 0.0, 360.0, 1.0, unit="deg"),
+    Param(("target", "motion_params", "sinusoidal", "amplitude_px"), "Side amplitude", "Motion: Sinusoidal",
+          "float", 120.0, 0.0, 600.0, 5.0, unit="px"),
+    Param(("target", "motion_params", "sinusoidal", "period_s"), "Period", "Motion: Sinusoidal",
+          "float", 8.0, 1.0, 60.0, 0.5, unit="s"),
+
+    Param(("target", "motion_params", "user_defined", "waypoints"), "Waypoints (dx,dy; ...)",
+          "Motion: User-defined", "text", "0,0; 150,0; 150,150; 0,150",
+          help="Offsets from the spawn point in world px, visited in order then looped"),
+    Param(("target", "motion_params", "user_defined", "speed_px_s"), "Speed", "Motion: User-defined",
+          "float", 60.0, 0.0, 300.0, 1.0, unit="px/s"),
 
     # --- PTZ ---
     Param(("ptz", "max_pan_speed_deg_s"), "Max pan speed", "PTZ", "float", 5.0, 1.0, 30.0, 0.5, unit="deg/s",
@@ -125,6 +149,8 @@ PARAM_SCHEMA: List[Param] = [
     Param(("disturbances", "atmosphere", "mode"), "Atmosphere", "Atmosphere", "enum", "clear",
           options=[("clear", "Clear"), ("haze", "Haze"), ("fog", "Fog"),
                     ("rain", "Rain"), ("low_light", "Low light")]),
+    Param(("disturbances", "atmosphere", "strength"), "Severity", "Atmosphere", "float", 1.0, 0.0, 2.0, 0.05,
+          help="Scales the contrast and brightness reduction: 0 = none, 1 = preset, 2 = double"),
 
     # --- Turbulence ---
     Param(("disturbances", "turbulence", "enabled"), "Atmospheric turbulence", "Turbulence", "bool", False,
@@ -147,7 +173,7 @@ PARAM_SCHEMA: List[Param] = [
           options=[("linear", "Linear"), ("circular", "Circular"), ("random", "Random"),
                     ("spiral", "Spiral"), ("figure8", "Figure-8")]),
     Param(("disturbances", "platform_motion", "max_px_frame"), "Max drift", "Platform Motion",
-          "float", 20.0, 0.0, 30.0, 1.0, unit="px/frame", help="Spec max: +-20 px/frame"),
+          "float", 5.0, 0.0, 20.0, 0.5, unit="px/frame", help="Camera px per frame. Spec max: +-20 px/frame"),
 
     # --- Link budget ---
     Param(("link_budget", "beam_divergence_urad"), "Beam divergence", "Link Budget",
@@ -199,6 +225,7 @@ PARAM_SCHEMA: List[Param] = [
 GROUP_ORDER = [
     "Scene", "Camera", "Target",
     "Motion: Straight Line", "Motion: Circular", "Motion: Figure-8", "Motion: Random Walk",
+    "Motion: Spiral", "Motion: Sinusoidal", "Motion: User-defined",
     "PTZ", "Noise", "Jitter", "Atmosphere", "Turbulence", "Platform Motion",
     "Link Budget", "Scenario Preset", "Detector", "IMM Tracker", "PID Control",
 ]
@@ -214,6 +241,10 @@ def get_path(cfg: dict, path: Tuple):
 def set_path(cfg: dict, path: Tuple, value):
     node = cfg
     for key in path[:-1]:
+        # create missing dict levels (e.g. a motion type an older YAML
+        # never listed) instead of raising KeyError
+        if isinstance(node, dict) and key not in node:
+            node[key] = {}
         node = node[key]
     node[path[-1]] = value
 
@@ -242,11 +273,9 @@ def resolve_ui_values(base_cfg: dict, ui_values: dict) -> dict:
             value = float(value)
         elif p.kind == "bool":
             value = bool(value)
+        elif p.kind == "text":
+            value = str(value)
         set_path(cfg, p.path, value)
-
-    # target.size_px is a [w, h] pair; the UI only exposes one square size.
-    size = get_path(cfg, ("target", "size_px", 0))
-    set_path(cfg, ("target", "size_px", 1), size)
 
     # initial_location UI convenience -> real config value
     if get_path(cfg, ("target", "initial_location")) == "fixed_center":

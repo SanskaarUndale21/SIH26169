@@ -5,7 +5,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simulator.target_motion import (CircularMotion, Figure8Motion, RandomWalkMotion,
-                                      StraightLineMotion, make_motion_model)
+                                      SinusoidalMotion, StraightLineMotion, UserDefinedMotion,
+                                      make_motion_model, parse_waypoints)
 
 
 def test_straight_line_moves_linearly_before_bounds():
@@ -63,3 +64,59 @@ def test_make_motion_model_factory():
         model = make_motion_model(kind, 1000, 1000, 2000, 2000, {})
         pos = model.position(1.0)
         assert len(pos) == 2
+
+
+def test_make_motion_model_factory_optional_types():
+    for kind in ("sinusoidal", "user_defined"):
+        model = make_motion_model(kind, 1000, 1000, 2000, 2000, {})
+        x, y = model.position(1.0)
+        assert 0 <= x <= 2000 and 0 <= y <= 2000
+
+
+def test_sinusoidal_weaves_around_heading():
+    m = SinusoidalMotion(x0=500, y0=1000, width=2000, height=2000,
+                         speed_px_s=10, angle_deg=0, amplitude_px=100, period_s=4)
+    x, y = m.position(1.0)  # quarter period -> full sideways amplitude
+    assert abs(x - 510) < 1e-6
+    assert abs(y - 1100) < 1e-6
+
+
+def test_user_defined_path_visits_waypoints_and_loops():
+    m = UserDefinedMotion(x0=1000, y0=1000, width=2000, height=2000,
+                          waypoints="100,0; 100,100", speed_px_s=100)
+    assert m.position(0) == (1000, 1000)
+    x, y = m.position(1.0)  # 100px along first leg
+    assert abs(x - 1100) < 1e-6 and abs(y - 1000) < 1e-6
+    loop = m._cum[-1] / 100
+    x, y = m.position(loop)
+    assert abs(x - 1000) < 1e-6 and abs(y - 1000) < 1e-6
+
+
+def test_parse_waypoints_rejects_garbage():
+    import pytest
+    assert parse_waypoints("1,2; 3 4") == [(1.0, 2.0), (3.0, 4.0)]
+    with pytest.raises(ValueError):
+        parse_waypoints("1,2,3")
+
+
+def test_platform_motion_drift_is_applied_from_config():
+    from simulator.camera_model import CameraModel
+    from simulator.disturbances import DisturbanceConfig
+    from simulator.renderer import SimulatorEngine
+    from simulator.scene import Scene
+    cfg = {"disturbances": {"platform_motion": {"enabled": True, "mode": "linear", "max_px_frame": 16}}}
+    dcfg = DisturbanceConfig.from_config(cfg)
+    cam = CameraModel()
+    engine = SimulatorEngine(Scene(), cam, dcfg)
+    x0, y0 = cam.world_x, cam.world_y
+    engine.step(1 / 30)
+    moved_cam_px = math.hypot(cam.world_x - x0, cam.world_y - y0) / cam.world_px_per_deg * cam.px_per_deg_x
+    assert abs(moved_cam_px - 16) < 1e-6
+
+
+def test_every_platform_mode_produces_drift():
+    from simulator.disturbances import PlatformMotionDrift
+    for mode in ("linear", "circular", "random", "spiral", "figure8"):
+        d = PlatformMotionDrift(mode=mode, max_px_frame=10)
+        total = sum(abs(a) + abs(b) for a, b in (d.step(1 / 30) for _ in range(60)))
+        assert total > 0, mode

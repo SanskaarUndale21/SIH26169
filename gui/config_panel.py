@@ -16,7 +16,7 @@ import copy
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-                                QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                                 QListWidget, QListWidgetItem, QPushButton, QScrollArea,
                                 QSizePolicy, QSlider, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
@@ -200,6 +200,11 @@ class ConfigPanel(QWidget):
             if param.help:
                 w.setToolTip(param.help)
             return w
+        if param.kind == "text":
+            w = QLineEdit(str(current_value if current_value is not None else param.default))
+            if param.help:
+                w.setToolTip(param.help)
+            return w
         # int / float -> slider + spinbox
         row = _NumericRow(param)
         row.set_value(current_value if current_value is not None else param.default)
@@ -210,6 +215,8 @@ class ConfigPanel(QWidget):
             return widget.isChecked()
         if param.kind == "enum":
             return widget.currentData()
+        if param.kind == "text":
+            return widget.text()
         return widget.value()
 
     def _on_source_changed(self, idx):

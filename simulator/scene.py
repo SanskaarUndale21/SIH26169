@@ -12,8 +12,9 @@ from simulator.target_motion import make_motion_model, MotionModel
 class Target:
     motion: MotionModel
     shape: str = "square"
-    size_px: int = 10
+    size_px: int = 10          # width
     id: int = 0
+    size_h_px: int = None      # height; None = square (same as width)
 
     def position(self, t: float):
         return self.motion.position(t)
@@ -67,7 +68,9 @@ class Scene:
                 x0, y0, scene.width, scene.height,
                 tcfg.get("motion_params", {}),
             )
-            size = tcfg.get("size_px", [10, 10])[0]
+            size = tcfg.get("size_px", [10, 10])
+            w_px = size[0]
+            h_px = size[1] if len(size) > 1 else size[0]
             scene.targets.append(Target(motion=motion, shape=tcfg.get("shape", "square"),
-                                         size_px=size, id=i))
+                                         size_px=w_px, id=i, size_h_px=h_px))
         return scene

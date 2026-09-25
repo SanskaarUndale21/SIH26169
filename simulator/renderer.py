@@ -33,6 +33,12 @@ class SimulatorEngine:
         self.scene = scene
         self.camera = camera
         self.disturbance_cfg = disturbance_cfg
+        # Built from the disturbance config when not passed explicitly, so
+        # every entry point (desktop GUI, web live engine, tests) gets the
+        # configured platform drift. Before this, only the benchmark
+        # matrix constructed one and the GUI/web toggle silently did nothing.
+        if platform_motion is None:
+            platform_motion = PlatformMotionDrift.from_disturbance_config(disturbance_cfg)
         self.platform_motion = platform_motion
         self.rng = np.random.default_rng(seed)
         self.t = 0.0
@@ -47,9 +53,11 @@ class SimulatorEngine:
         self.t += dt
         self._last_dt = dt
         if self.platform_motion is not None:
-            dx, dy = self.platform_motion.step(dt)
-            self.camera.world_x += dx
-            self.camera.world_y += dy
+            # drift is specified in camera px/frame; convert to world px
+            dx_cam, dy_cam = self.platform_motion.step(dt)
+            cam = self.camera
+            self.camera.world_x += dx_cam / cam.px_per_deg_x * cam.world_px_per_deg
+            self.camera.world_y += dy_cam / cam.px_per_deg_y * cam.world_px_per_deg
 
     def render(self) -> tuple[np.ndarray, list[tuple[float, float]]]:
         """Returns (image, list of in-FOV ground-truth target centres in
@@ -63,7 +71,8 @@ class SimulatorEngine:
             u, v = self.camera.world_to_camera_px(xt, yt)
             if self.camera.is_in_fov(u, v):
                 gt_positions.append((u, v))
-                _draw_target(img, u, v, target.size_px, target.shape)
+                _draw_target(img, u, v, target.size_px, target.shape,
+                             target.size_h_px or target.size_px)
         img, info = apply_disturbances(img, self.disturbance_cfg, self.rng,
                                         jitter_model=self.jitter_model, dt=self._last_dt)
         # Jitter shifts the rendered image content itself (sensor-level
@@ -76,15 +85,19 @@ class SimulatorEngine:
         return img, gt_positions
 
 
-def _draw_target(img: np.ndarray, u: float, v: float, size: int, shape: str):
+def _draw_target(img: np.ndarray, u: float, v: float, size: int, shape: str,
+                 size_h: int | None = None):
     h, w = img.shape[:2]
-    half = size // 2
+    size_h = size_h or size
+    half, half_h = size // 2, size_h // 2
     cu, cv = int(round(u)), int(round(v))
     if shape == "circle":
         import cv2
-        cv2.circle(img, (cu, cv), max(1, half), 255, -1, lineType=cv2.LINE_AA)
+        # circle with unequal W x H is an ellipse
+        cv2.ellipse(img, (cu, cv), (max(1, half), max(1, half_h)), 0, 0, 360, 255, -1,
+                    lineType=cv2.LINE_AA)
     else:
         x0, x1 = max(0, cu - half), min(w, cu + half + 1)
-        y0, y1 = max(0, cv - half), min(h, cv + half + 1)
+        y0, y1 = max(0, cv - half_h), min(h, cv + half_h + 1)
         if x1 > x0 and y1 > y0:
             img[y0:y1, x0:x1] = 255

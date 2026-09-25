@@ -123,8 +123,14 @@ ATMOSPHERE_PRESETS = {
 }
 
 
-def apply_atmosphere(img: np.ndarray, mode: str = "clear", rng: Optional[np.random.Generator] = None) -> np.ndarray:
+def apply_atmosphere(img: np.ndarray, mode: str = "clear", rng: Optional[np.random.Generator] = None,
+                     strength: float = 1.0) -> np.ndarray:
+    """strength scales the preset's contrast loss and brightness shift
+    (the spec's "user-defined reduction in contrast and brightness"):
+    0 = clear, 1 = the preset as listed, 2 = twice as severe."""
     contrast, brightness = ATMOSPHERE_PRESETS.get(mode, (1.0, 0))
+    contrast = max(0.05, 1.0 - (1.0 - contrast) * strength)
+    brightness = brightness * strength
     out = img.astype(np.float32) * contrast + brightness
     if mode == "rain":
         out = _apply_rain_streaks(out, rng or np.random.default_rng())
@@ -210,28 +216,50 @@ def apply_turbulence(img: np.ndarray, r0: float = 0.05, strength: float = 3.0,
 @dataclass
 class PlatformMotionDrift:
     """Uncommanded platform motion that moves the camera boresight itself,
-    stacking on top of intentional PTZ commands (Section 6.4 last bullet)."""
+    stacking on top of intentional PTZ commands (Section 6.4 last bullet).
+
+    step() returns the boresight displacement for ONE frame in camera
+    pixels, matching the spec's "+-20 pixels/frame" unit; SimulatorEngine
+    converts it to world pixels through the camera's own px-per-degree
+    scale. (An earlier revision multiplied by dt, which silently shrank
+    the drift ~30x below its labelled px/frame value.)"""
     mode: str = "linear"
     max_px_frame: float = 20.0
     angle_deg: float = 15.0
+    period_s: float = 6.0
     t: float = 0.0
     _phase: float = field(default_factory=lambda: 0.0)
 
     def step(self, dt: float) -> Tuple[float, float]:
         self.t += dt
+        m = self.max_px_frame
+        w = 2 * math.pi / self.period_s
         if self.mode == "linear":
-            dx = self.max_px_frame * math.cos(math.radians(self.angle_deg))
-            dy = self.max_px_frame * math.sin(math.radians(self.angle_deg))
+            dx = m * math.cos(math.radians(self.angle_deg))
+            dy = m * math.sin(math.radians(self.angle_deg))
         elif self.mode == "circular":
-            omega = 1.0
-            dx = self.max_px_frame * math.cos(omega * self.t)
-            dy = self.max_px_frame * math.sin(omega * self.t)
+            dx = m * math.cos(w * self.t)
+            dy = m * math.sin(w * self.t)
         elif self.mode == "random":
-            dx = np.random.uniform(-self.max_px_frame, self.max_px_frame)
-            dy = np.random.uniform(-self.max_px_frame, self.max_px_frame)
+            dx = np.random.uniform(-m, m)
+            dy = np.random.uniform(-m, m)
+        elif self.mode == "spiral":
+            # growing-then-resetting radius: amplitude ramps 0 -> max over 3 periods
+            r = m * ((self.t / (3 * self.period_s)) % 1.0)
+            dx = r * math.cos(w * self.t)
+            dy = r * math.sin(w * self.t)
+        elif self.mode == "figure8":
+            dx = m * math.sin(w * self.t)
+            dy = m * math.sin(2 * w * self.t)
         else:
             dx = dy = 0.0
-        return dx * dt, dy * dt
+        return dx, dy
+
+    @classmethod
+    def from_disturbance_config(cls, cfg: "DisturbanceConfig") -> Optional["PlatformMotionDrift"]:
+        if not cfg.platform_motion:
+            return None
+        return cls(mode=cfg.platform_motion_mode, max_px_frame=cfg.platform_motion_max_px_frame)
 
 
 @dataclass
@@ -252,6 +280,10 @@ class DisturbanceConfig:
     turbulence_wavelength_nm: float = 1550.0
     turbulence_altitude_m: float = 20000.0
     turbulence_zenith_deg: float = 0.0
+    atmosphere_strength: float = 1.0      # 0 = no effect, 1 = preset, up to 2 = twice as severe
+    platform_motion: bool = False
+    platform_motion_mode: str = "linear"
+    platform_motion_max_px_frame: float = 5.0
 
     @classmethod
     def from_config(cls, cfg: dict) -> "DisturbanceConfig":
@@ -259,6 +291,7 @@ class DisturbanceConfig:
         noise = d.get("noise", {})
         jitter_cfg = d.get("jitter", {})
         turb_cfg = d.get("turbulence", {})
+        pm_cfg = d.get("platform_motion", {})
         return cls(
             salt_pepper=noise.get("salt_pepper", {}).get("enabled", False),
             salt_pepper_amount=noise.get("salt_pepper", {}).get("amount", 0.10),
@@ -276,6 +309,10 @@ class DisturbanceConfig:
             turbulence_wavelength_nm=turb_cfg.get("wavelength_nm", 1550.0),
             turbulence_altitude_m=turb_cfg.get("altitude_m", 20000.0),
             turbulence_zenith_deg=turb_cfg.get("zenith_deg", 0.0),
+            atmosphere_strength=d.get("atmosphere", {}).get("strength", 1.0),
+            platform_motion=pm_cfg.get("enabled", False),
+            platform_motion_mode=pm_cfg.get("mode", "linear"),
+            platform_motion_max_px_frame=pm_cfg.get("max_px_frame", 5.0),
         )
 
     def resolved_turbulence_r0(self) -> float:
@@ -318,7 +355,7 @@ def apply_disturbances(img: np.ndarray, cfg: DisturbanceConfig,
     out = img
     info = {}
     if cfg.atmosphere_mode != "clear":
-        out = apply_atmosphere(out, cfg.atmosphere_mode, rng)
+        out = apply_atmosphere(out, cfg.atmosphere_mode, rng, strength=cfg.atmosphere_strength)
     if cfg.turbulence:
         out = apply_turbulence(out, cfg.resolved_turbulence_r0(), rng=rng)
     if cfg.salt_pepper:
