@@ -12,6 +12,11 @@ pip install -r requirements.txt
 
 Requires Python 3.10+.
 
+## Quick start on Windows
+
+Double-click `start.bat`: it starts the web console, opens it in your
+browser, and launches the desktop app.
+
 ## Run the desktop GUI
 
 ```
