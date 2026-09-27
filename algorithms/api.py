@@ -195,7 +195,8 @@ def check_point(out, name: str, what: str) -> Optional[Tuple[float, float]]:
     try:
         x, y = float(out[0]), float(out[1])
     except Exception:
-        raise AlgorithmError(f"{what} '{name}' must return (x, y) or None, got {out!r}")
+        shape = "(pan_rate, tilt_rate)" if what == "Controller" else "(x, y) or None"
+        raise AlgorithmError(f"{what} '{name}' must return {shape}, got {out!r}")
     if not (math.isfinite(x) and math.isfinite(y)):
         raise AlgorithmError(f"{what} '{name}' returned a non-finite value {out!r}")
     return x, y

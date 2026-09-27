@@ -63,3 +63,16 @@ def test_run_autosaves_and_exports_centroids(client, tmp_path):
     header, first = csv_text.splitlines()[:2]
     assert header.startswith("frame_id,timestamp_s,lock_state")
     assert len(first.split(",")) == 12
+
+
+def test_simultaneous_starts_launch_exactly_one_run(client):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as ex:
+        codes = list(ex.map(lambda _: client.post("/api/control/start", json={"ui_values": {}, "realtime": True}).status_code, range(8)))
+    client.post("/api/control/stop")
+    assert sorted(codes) == [200] + [409] * 7
+
+
+def test_unknown_algorithm_is_a_bad_request(client):
+    r = client.post("/api/control/start", json={"ui_values": {"algorithms/tracker/id": "user:nope:X"}})
+    assert r.status_code == 400 and "not found" in r.json()["detail"]

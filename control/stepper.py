@@ -69,6 +69,8 @@ class PointingStepper:
                 raise
             except Exception as exc:
                 raise AlgorithmError(f"Controller '{self._ctrl_name}' crashed: {exc}")
+            if out is None:
+                raise AlgorithmError(f"Controller '{self._ctrl_name}' must return (pan_rate, tilt_rate), got None")
             pan_rate, tilt_rate = check_point(out, self._ctrl_name, "Controller")
         elif telemetry.lock_state == "reacquiring":
             if self._prev_lock_state != "reacquiring":

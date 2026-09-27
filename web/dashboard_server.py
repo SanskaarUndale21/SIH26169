@@ -483,11 +483,17 @@ def api_scenarios() -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 _bench = {"job": None}
+_bench_lock = __import__("threading").Lock()
 
 
 @app.post("/api/bench/start")
 def api_bench_start(payload: dict) -> JSONResponse:
     from algorithms.benchmark import BenchJob
+    with _bench_lock:
+        return _bench_start_locked(payload, BenchJob)
+
+
+def _bench_start_locked(payload: dict, BenchJob) -> JSONResponse:
     job = _bench["job"]
     if job is not None and not job.done:
         raise HTTPException(status_code=409, detail="A comparison is already running")
@@ -584,6 +590,8 @@ def api_control_start(payload: dict) -> JSONResponse:
         cfg = _build_config(payload.get("ui_values", {}))
         result = live_engine.start(cfg, str(LOGS_DIR), video_path=payload.get("video_path"),
                                    realtime=bool(payload.get("realtime", True)))
+    except AlgorithmError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:

@@ -95,3 +95,17 @@ def test_example_plugins_lock_on():
         res = run_single(build_config({}, algos), 3, 4.0)
         assert res["error"] is None, res["error"]
         assert res["metrics"]["acquisition_time_sec"] is not None
+
+
+def test_check_kills_infinite_loop_and_exit():
+    loop = "from algorithms.api import Detector\nclass A(Detector):\n    def detect(self, im):\n        while True: pass\n"
+    r = validate_code(loop, timeout_s=8)
+    assert not r["ok"] and "did not finish" in r["error"]
+    r = validate_code("import sys\nfrom algorithms.api import Tracker\nclass A(Tracker):\n    def update(self, dt, m): sys.exit(1)\n")
+    assert not r["ok"]
+
+
+def test_controller_returning_none_is_reported():
+    r = validate_code("from algorithms.api import Controller\nclass A(Controller):\n    def compute(self, ex, ey, dt): return None\n")
+    assert not r["ok"]
+    assert "(pan_rate, tilt_rate)" in r["algorithms"][0]["runs"][0]["error"]

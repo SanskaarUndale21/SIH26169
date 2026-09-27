@@ -255,42 +255,65 @@ def _algo_name(aid: str) -> str:
 
 # --------------------------------------------------------------- validation
 
-def validate_code(code: str, timeout_s: float = 90.0) -> dict:
-    """Loads unsaved plugin code in isolation and runs each algorithm it
-    defines through two short closed-loop scenarios (spec defaults and
-    heavy noise), with the other two stages at their defaults."""
+def _validate_in_process(code: str) -> dict:
+    """The actual check; runs inside a child process (see validate_code)."""
     tmpdir = tempfile.mkdtemp(prefix="fsoc_check_")
     path = Path(tmpdir) / "candidate.py"
     path.write_text(code, encoding="utf-8")
+    found, err = registry.load_file(path)
+    if err:
+        return {"ok": False, "error": err, "algorithms": []}
+    report = {"ok": True, "error": None, "algorithms": []}
+    for aid, cls in found.items():
+        slot = registry.slot_of(cls)
+        entry = {"class": cls.__name__, "name": cls.display_name(), "slot": slot, "runs": []}
+        for sid in ("default", "noise"):
+            algos = {s: {"id": registry.DEFAULTS[s], "params": {}} for s in SLOTS}
+            algos[slot] = {"id": aid, "params": {}, "_cls": cls}
+            res = run_single(build_config(SCENARIOS[sid]["values"], algos), 7, 6.0)
+            entry["runs"].append({"scenario": SCENARIOS[sid]["title"], **res})
+            if res["error"]:
+                report["ok"] = False
+                break
+        report["algorithms"].append(entry)
+    return report
+
+
+def _validate_worker(code, conn):
+    try:
+        conn.send(_validate_in_process(code))
+    except Exception as exc:
+        conn.send({"ok": False, "error": f"{exc}\n{traceback.format_exc(limit=5)}", "algorithms": []})
+    finally:
+        conn.close()
+
+
+def validate_code(code: str, timeout_s: float = 90.0) -> dict:
+    """Loads unsaved plugin code and runs each algorithm it defines through
+    two short closed-loop scenarios (spec defaults and heavy noise), with the
+    other two stages at their defaults. Runs in a separate process that is
+    killed on timeout, so an infinite loop or crash in the user's code can't
+    leave a stuck thread burning CPU inside the server."""
     try:
         compile(code, "your file", "exec")
     except SyntaxError as exc:
         return {"ok": False, "error": f"Syntax error on line {exc.lineno}: {exc.msg}", "algorithms": []}
-    found, err = registry.load_file(path)
-    if err:
-        return {"ok": False, "error": err, "algorithms": []}
-
-    report = {"ok": True, "error": None, "algorithms": []}
-
-    def work():
-        for aid, cls in found.items():
-            slot = registry.slot_of(cls)
-            entry = {"class": cls.__name__, "name": cls.display_name(), "slot": slot, "runs": []}
-            for sid in ("default", "noise"):
-                algos = {s: {"id": registry.DEFAULTS[s], "params": {}} for s in SLOTS}
-                algos[slot] = {"id": aid, "params": {}, "_cls": cls}
-                cfg = build_config(SCENARIOS[sid]["values"], algos)
-                res = run_single(cfg, 7, 6.0)
-                entry["runs"].append({"scenario": SCENARIOS[sid]["title"], **res})
-                if res["error"]:
-                    report["ok"] = False
-                    break
-            report["algorithms"].append(entry)
-
-    t = threading.Thread(target=work, daemon=True)
-    t.start()
-    t.join(timeout_s)
-    if t.is_alive():
-        report["ok"] = False
-        report["error"] = f"Check did not finish within {timeout_s:.0f} s. Look for an infinite loop or very slow code."
-    return report
+    import multiprocessing as mp
+    ctx = mp.get_context("spawn")
+    parent, child = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_validate_worker, args=(code, child), daemon=True)
+    proc.start()
+    child.close()
+    try:
+        if parent.poll(timeout_s):
+            return parent.recv()
+        return {"ok": False, "algorithms": [],
+                "error": f"Check did not finish within {timeout_s:.0f} s. Look for an infinite loop or very slow code."}
+    except EOFError:
+        return {"ok": False, "algorithms": [],
+                "error": "Your code stopped the checker process (for example by calling exit() or crashing Python)."}
+    finally:
+        if proc.is_alive():
+            proc.kill()
+        proc.join(5)
+        parent.close()

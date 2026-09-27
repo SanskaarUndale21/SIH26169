@@ -66,6 +66,7 @@ class _PacedSource:
 class LiveEngine:
     def __init__(self):
         self._lock = threading.Lock()
+        self._start_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._stop_flag = False
         self._runner: Optional[TrackingRunner] = None
@@ -86,8 +87,15 @@ class LiveEngine:
 
     def start(self, config: dict, output_dir: str, video_path: Optional[str] = None,
               realtime: bool = True) -> dict:
-        if self.is_running():
-            raise RuntimeError("a run is already active, stop it first")
+        # Serialised so simultaneous Start requests can't both pass the
+        # "is anything running?" check and launch two engines at once.
+        with self._start_lock:
+            if self.is_running():
+                raise RuntimeError("a run is already active, stop it first")
+            return self._start_locked(config, output_dir, video_path, realtime)
+
+    def _start_locked(self, config: dict, output_dir: str, video_path: Optional[str],
+                      realtime: bool) -> dict:
         for slot in ("detector", "tracker", "controller"):
             registry.get(registry.selection(config, slot)[0])  # fail fast on a missing plugin
 
