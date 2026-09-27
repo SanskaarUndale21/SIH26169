@@ -23,6 +23,7 @@ import base64
 import csv
 import io
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -33,10 +34,20 @@ from fastapi.staticfiles import StaticFiles
 
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
-LOGS_DIR = REPO_ROOT / "logs"
+# Deployment settings (all optional; defaults are for local use):
+#   FSOC_DATA_DIR   where run logs, benchmarks and uploads are kept (point at a persistent disk)
+#   FSOC_PUBLIC=1   public mode: writing, uploading, checking and deleting algorithm
+#                   plugins is disabled, because a plugin is arbitrary Python run on the server
+#   FSOC_PASSWORD   if set, every page and API asks for this password (any user name)
+#   HOST / PORT     where to listen (default 127.0.0.1:8420)
+DATA_DIR = Path(os.environ.get("FSOC_DATA_DIR", REPO_ROOT))
+PUBLIC_MODE = os.environ.get("FSOC_PUBLIC", "").lower() in ("1", "true", "yes")
+PASSWORD = os.environ.get("FSOC_PASSWORD", "")
+MAX_VIDEO_MB = int(os.environ.get("FSOC_MAX_VIDEO_MB", "200"))
+LOGS_DIR = DATA_DIR / "logs"
 STATIC_DIR = APP_DIR / "static"
 UI_DIR = APP_DIR / "ui"
-UPLOAD_DIR = REPO_ROOT / "data" / "uploaded_videos"
+UPLOAD_DIR = DATA_DIR / "data" / "uploaded_videos"
 
 sys.path.insert(0, str(REPO_ROOT))  # so live_engine's `from control...` imports resolve
 from web.live_engine import engine as live_engine  # noqa: E402
@@ -45,6 +56,36 @@ from algorithms import registry  # noqa: E402
 from algorithms.api import AlgorithmError  # noqa: E402
 
 app = FastAPI(title="FSOC Coarse Alignment Console")
+
+
+if PASSWORD:
+    import secrets
+
+    @app.middleware("http")
+    async def _require_password(request, call_next):
+        auth = request.headers.get("authorization", "")
+        ok = False
+        if auth.lower().startswith("basic "):
+            try:
+                _, _, given = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
+                ok = secrets.compare_digest(given, PASSWORD)
+            except Exception:
+                ok = False
+        if not ok:
+            return Response("Password required", status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="FSOC console"'})
+        return await call_next(request)
+
+
+def _plugins_writable():
+    if PUBLIC_MODE:
+        raise HTTPException(status_code=403, detail="Adding or changing algorithms is turned off on this public "
+                                                    "deployment. Run the console locally to test your own code.")
+
+
+@app.get("/api/features")
+def api_features() -> JSONResponse:
+    return JSONResponse({"plugins_writable": not PUBLIC_MODE})
 # Three.js and fonts fallbacks are local, so every page works offline at a demo.
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -388,6 +429,7 @@ def api_algorithm_template(slot: str, title: str = "My algorithm") -> JSONRespon
 
 @app.post("/api/algorithms/check")
 def api_algorithm_check(payload: dict) -> JSONResponse:
+    _plugins_writable()
     from algorithms.benchmark import validate_code
     code = payload.get("code") or ""
     if not code.strip():
@@ -397,6 +439,7 @@ def api_algorithm_check(payload: dict) -> JSONResponse:
 
 @app.post("/api/algorithms/save")
 def api_algorithm_save(payload: dict) -> JSONResponse:
+    _plugins_writable()
     path = _user_file(payload.get("file", ""))
     code = payload.get("code") or ""
     if path.exists() and not payload.get("overwrite"):
@@ -413,6 +456,7 @@ def api_algorithm_save(payload: dict) -> JSONResponse:
 
 @app.post("/api/algorithms/upload")
 async def api_algorithm_upload(file: UploadFile, overwrite: bool = False) -> JSONResponse:
+    _plugins_writable()
     name = Path(file.filename or "").name.lower().replace("-", "_").replace(" ", "_")
     code = (await file.read()).decode("utf-8", errors="replace")
     return api_algorithm_save({"file": name, "code": code, "overwrite": overwrite})
@@ -420,6 +464,7 @@ async def api_algorithm_upload(file: UploadFile, overwrite: bool = False) -> JSO
 
 @app.delete("/api/algorithms/file/{filename}")
 def api_algorithm_delete(filename: str) -> JSONResponse:
+    _plugins_writable()
     path = _user_file(filename)
     if not path.exists():
         raise HTTPException(status_code=404, detail="file not found")
@@ -515,9 +560,18 @@ def api_bench_get(bench_id: str) -> JSONResponse:
 async def api_upload_video(file: UploadFile) -> JSONResponse:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename or "upload.mp4").name  # strip any path components
+    if not safe_name.lower().endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="Only .mp4 files are accepted")
     dest = UPLOAD_DIR / safe_name
+    size = 0
     with open(dest, "wb") as f:
-        f.write(await file.read())
+        while chunk := await file.read(1 << 20):
+            size += len(chunk)
+            if size > MAX_VIDEO_MB * 1024 * 1024:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail=f"Video is larger than {MAX_VIDEO_MB} MB")
+            f.write(chunk)
     return JSONResponse({"path": str(dest), "name": safe_name})
 
 
@@ -590,5 +644,7 @@ async def ws_live(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn
     print(f"Reading run logs from: {LOGS_DIR}")
-    print("Open http://127.0.0.1:8420/")
-    uvicorn.run(app, host="127.0.0.1", port=8420, log_level="warning")
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8420"))
+    print(f"Open http://{host}:{port}/" + ("  (public mode: plugin editing off)" if PUBLIC_MODE else ""))
+    uvicorn.run(app, host=host, port=port, log_level="warning")

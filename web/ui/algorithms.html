@@ -150,7 +150,7 @@ async function select(id) {
       <div class="acts">
         <a class="btn primary" href="/compare?slot=${a.slot}&id=${encodeURIComponent(a.id)}">Compare with default</a>
         <a class="btn" href="/setup?step=tracking&${a.slot}=${encodeURIComponent(a.id)}">Use in a run</a>
-        ${src.editable ? `<button class="btn" type="button" id="editBtn">Edit</button><button class="btn danger" type="button" id="delBtn">Delete</button>` : ""}
+        ${src.editable && !window.READ_ONLY ? `<button class="btn" type="button" id="editBtn">Edit</button><button class="btn danger" type="button" id="delBtn">Delete</button>` : ""}
       </div>
     </div>
     ${params.length ? `<h3 style="margin-top:10px">Parameters</h3><table class="params"><thead><tr><th>Name</th><th>Default</th><th>Range</th><th>Meaning</th></tr></thead><tbody>
@@ -158,7 +158,7 @@ async function select(id) {
       : `<p class="small faint">No parameters of its own${a.source === "builtin" && a.default ? "; tuned in the New run page's tracking step." : "."}</p>`}
     <h3 style="margin:18px 0 8px">Source</h3>
     <div class="code"><div class="gutter">${src.code.split("\n").map((_, i) => i + 1).join("\n")}</div><pre>${esc(src.code)}</pre></div>`;
-  if (src.editable) {
+  if (src.editable && !window.READ_ONLY) {
     $("editBtn").onclick = () => openEditor({ file: src.file, code: src.code, isNew: false });
     $("delBtn").onclick = async () => {
       if (!confirm(`Delete user_algorithms/${src.file}? Every algorithm in that file is removed.`)) return;
@@ -173,8 +173,8 @@ function confirmLeave() { return confirm("Discard unsaved changes in the editor?
 function showWelcome() {
   $("detail").innerHTML = `<div class="empty"><h3>Pick an algorithm to read it, or write your own</h3>
     <p>Start from a template, check it on two quick scenarios, save it, then compare it against the default.</p>
-    <button class="btn primary" type="button" id="wNew">Write a new algorithm</button></div>`;
-  $("wNew").onclick = newFlow;
+    ${window.READ_ONLY ? "" : `<button class="btn primary" type="button" id="wNew">Write a new algorithm</button>`}</div>`;
+  if (!window.READ_ONLY) $("wNew").onclick = newFlow;
 }
 
 // ---------- new ----------
@@ -199,7 +199,7 @@ function newFlow() {
     openEditor({ file: t.file, code: t.code, isNew: true });
   };
 }
-$("newBtn").onclick = newFlow;
+if ($("newBtn")) $("newBtn").onclick = newFlow;
 
 // ---------- editor ----------
 function openEditor(e) {
@@ -297,6 +297,16 @@ $("uploadFile").addEventListener("change", async ev => {
 addEventListener("beforeunload", e => { if (editing) { e.preventDefault(); e.returnValue = ""; } });
 
 (async () => {
+  const feat = await api("/api/features");
+  if (!feat.plugins_writable) {
+    window.READ_ONLY = true;
+    document.querySelector(".page-head .actions").innerHTML = "";
+    const note = document.createElement("div");
+    note.className = "panel"; note.style.marginBottom = "24px";
+    note.innerHTML = `<h3>Viewing only</h3><p class="muted small" style="margin:4px 0 0">This is a public demo, so writing and uploading algorithms is turned off.
+      You can still read every algorithm and compare them. To test your own code, run the console on your own computer (see docs/algorithm_guide.md).</p>`;
+    document.getElementById("errors").before(note);
+  }
   await refresh();
   const want = new URLSearchParams(location.search).get("id");
   if (want && lib.algorithms.some(a => a.id === want)) select(want); else showWelcome();

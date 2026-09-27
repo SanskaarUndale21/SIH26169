@@ -57,6 +57,10 @@ desktop GUI (`web/live_engine.py` runs a real `TrackingRunner`):
   scenarios with the same seeds, scored against the spec targets.
 - `/spec` Spec check: every problem-statement requirement and its status.
 
+## Deploy the web console
+
+One Docker container serves both frontend and backend. See `docs/deploy.md` (Render or Hugging Face Spaces; Vercel does not fit).
+
 ## Test your own algorithm
 
 Any of the three loop stages (detector, tracker, pointing controller) can

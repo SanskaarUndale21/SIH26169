@@ -1,0 +1,9 @@
+# Web console only (used by the Dockerfile). No desktop GUI, no torch.
+numpy>=1.26
+scipy>=1.11
+opencv-python-headless>=4.9
+PyYAML>=6.0
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12.0
+python-multipart>=0.0.9

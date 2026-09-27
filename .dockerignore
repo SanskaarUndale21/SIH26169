@@ -1,0 +1,14 @@
+.git
+.claude
+**/__pycache__
+.pytest_cache
+build
+dist
+logs
+data
+docs
+gui
+tests
+*.pptx
+*.pdf
+*.spec
