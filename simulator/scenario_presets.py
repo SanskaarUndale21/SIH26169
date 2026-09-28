@@ -41,7 +41,7 @@ def leo_leo_crosslink(base_cfg: dict, altitude_km: float = 500.0, range_km: floa
     cfg["target"]["motion"] = "straight_line"
     cfg["target"]["motion_params"] = dict(cfg["target"].get("motion_params", {}))
     cfg["target"]["motion_params"]["straight_line"] = {"speed_px_s": speed_px_s, "angle_deg": 25}
-    _apply_link_budget(cfg, wavelength_nm=1550.0, range_km=range_km, beam_divergence_urad=20.0)
+    _apply_link_budget(cfg, wavelength_nm=1550.0, range_km=range_km, beam_divergence_urad=100.0)
     cfg["_scenario_name"] = "leo_leo_crosslink"
     cfg["_scenario_derivation"] = (
         f"altitude={altitude_km}km, range={range_km}km, rel_inclination={relative_inclination_deg}deg "
@@ -72,7 +72,7 @@ def leo_ground_downlink(base_cfg: dict, altitude_km: float = 500.0, pass_segment
     cfg["target"]["motion"] = "circular"
     cfg["target"]["motion_params"] = dict(cfg["target"].get("motion_params", {}))
     cfg["target"]["motion_params"]["circular"] = {"radius_px": radius_px, "period_s": pass_segment_s}
-    _apply_link_budget(cfg, wavelength_nm=1550.0, range_km=altitude_km, beam_divergence_urad=20.0)
+    _apply_link_budget(cfg, wavelength_nm=1550.0, range_km=altitude_km, beam_divergence_urad=100.0)
     cfg["_scenario_name"] = "leo_ground_downlink"
     cfg["_scenario_derivation"] = (
         f"altitude={altitude_km}km -> peak angular rate {deg_s:.4f} deg/s -> "
@@ -94,7 +94,7 @@ def geo_ground(base_cfg: dict, station_keeping_box_deg: float = 0.05) -> dict:
     cfg["target"]["motion"] = "straight_line"
     cfg["target"]["motion_params"] = dict(cfg["target"].get("motion_params", {}))
     cfg["target"]["motion_params"]["straight_line"] = {"speed_px_s": max(speed_px_s, 0.01), "angle_deg": 0}
-    _apply_link_budget(cfg, wavelength_nm=1550.0, range_km=35786.0, beam_divergence_urad=20.0)
+    _apply_link_budget(cfg, wavelength_nm=1550.0, range_km=35786.0, beam_divergence_urad=100.0)
     cfg["_scenario_name"] = "geo_ground"
     cfg["_scenario_derivation"] = (
         f"station-keeping box={station_keeping_box_deg}deg -> residual rate {deg_s:.2e} deg/s -> "

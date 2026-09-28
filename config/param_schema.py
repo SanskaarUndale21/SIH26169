@@ -196,7 +196,7 @@ PARAM_SCHEMA: List[Param] = [
 
     # --- Link budget ---
     Param(("link_budget", "beam_divergence_urad"), "Beam divergence", "Link Budget",
-          "float", 20.0, 1.0, 200.0, 1.0, unit="urad"),
+          "float", 100.0, 1.0, 500.0, 1.0, unit="urad"),
     Param(("link_budget", "fine_stage_capture_range_urad"), "Fine-stage capture range", "Link Budget",
           "float", 500.0, 10.0, 2000.0, 10.0, unit="urad"),
     Param(("link_budget", "wavelength_nm"), "Wavelength", "Link Budget",

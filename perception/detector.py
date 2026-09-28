@@ -69,7 +69,10 @@ def robust_background_stats(img: np.ndarray) -> Tuple[float, float]:
     sample = img[::4, ::4]
     med = float(np.median(sample))
     mad = float(np.median(np.abs(sample.astype(np.float32) - med)))
-    sigma = 1.4826 * mad + 1e-6  # MAD->std conversion for a Gaussian-like background
+    # MAD->std conversion for a Gaussian-like background, floored at 1 grey
+    # level: when the background clips to 0 (low light), the MAD collapses
+    # and a near-zero sigma would make every noise speck a detection.
+    sigma = max(1.4826 * mad, 1.0)
     return med, sigma
 
 
@@ -103,30 +106,41 @@ def detect(img: np.ndarray, cfg: DetectorConfig) -> List[Candidate]:
     mask = (dog > thresh).astype(np.uint8)
 
     n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n_labels <= 1:
+        return []
+    # Filter by blob area and bounding-box aspect ratio first (cheap, on the
+    # stats table), then compute intensity-weighted centroids and peaks for
+    # the survivors in one vectorised pass. The earlier per-blob Python loop
+    # (mgrid + masked sums per blob) cost O(blobs) interpreter work, which
+    # dropped processing below 20 FPS when noise produced ~1000 blobs/frame
+    # (low light + Gaussian noise, where the clipped background shrinks the
+    # noise estimate).
+    area = stats[1:, cv2.CC_STAT_AREA]
+    bw = stats[1:, cv2.CC_STAT_WIDTH]
+    bh = stats[1:, cv2.CC_STAT_HEIGHT]
+    aspect = np.maximum(bw, bh) / np.maximum(1, np.minimum(bw, bh))
+    keep = (area >= cfg.min_blob_px) & (area <= cfg.max_blob_px) & (aspect <= 3.0)
+    if not keep.any():
+        return []
+    # Work only on the thresholded pixels (a small fraction of the frame).
+    lab_full = labels.ravel()
+    idx = np.flatnonzero(lab_full)
+    lab = lab_full[idx]
+    w = img.ravel()[idx].astype(np.float64)
+    ys, xs = np.divmod(idx, img.shape[1])
+    sum_w = np.bincount(lab, weights=w, minlength=n_labels)
+    sum_wx = np.bincount(lab, weights=w * xs, minlength=n_labels)
+    sum_wy = np.bincount(lab, weights=w * ys, minlength=n_labels)
+    peak_all = np.zeros(n_labels)
+    np.maximum.at(peak_all, lab, w)
+    ids = np.nonzero(keep)[0] + 1
+    peaks = peak_all[ids]
     candidates: List[Candidate] = []
-    for label in range(1, n_labels):
-        area = stats[label, cv2.CC_STAT_AREA]
-        if area < cfg.min_blob_px or area > cfg.max_blob_px:
+    for i, pk in zip(ids, np.atleast_1d(peaks)):
+        if sum_w[i] <= 0:
             continue
-        x0 = stats[label, cv2.CC_STAT_LEFT]
-        y0 = stats[label, cv2.CC_STAT_TOP]
-        bw = stats[label, cv2.CC_STAT_WIDTH]
-        bh = stats[label, cv2.CC_STAT_HEIGHT]
-        # reject blobs whose bounding box is far from roughly square/circular
-        aspect = max(bw, bh) / max(1, min(bw, bh))
-        if aspect > 3.0:
-            continue
-        region = img[y0:y0 + bh, x0:x0 + bw].astype(np.float32)
-        region_mask = (labels[y0:y0 + bh, x0:x0 + bw] == label).astype(np.float32)
-        weights = region * region_mask
-        total = weights.sum()
-        if total <= 0:
-            continue
-        ys, xs = np.mgrid[y0:y0 + bh, x0:x0 + bw]
-        x_c = float((xs * weights).sum() / total)
-        y_c = float((ys * weights).sum() / total)
-        peak = float(region.max())
-        candidates.append(Candidate(x=x_c, y=y_c, area=int(area), peak_intensity=peak))
+        candidates.append(Candidate(x=float(sum_wx[i] / sum_w[i]), y=float(sum_wy[i] / sum_w[i]),
+                                    area=int(stats[i, cv2.CC_STAT_AREA]), peak_intensity=float(pk)))
     return candidates
 
 

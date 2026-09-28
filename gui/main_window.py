@@ -235,12 +235,15 @@ class MainWindow(QMainWindow):
             self.actuator.command(pan_rate, tilt_rate, dt_ctrl)
             telemetry.pointing_command_deg = (pan_rate, tilt_rate)
 
-        tracking_error = None
+        tracking_error = centroid_error = None
         if self.frame_source.is_live():
             gts = getattr(self.frame_source, "last_ground_truth", [])
             if gts:
                 px, py = telemetry.predicted_px
                 tracking_error = min(((px - gx) ** 2 + (py - gy) ** 2) ** 0.5 for gx, gy in gts)
+                if telemetry.centroid_px is not None:
+                    cx, cy = telemetry.centroid_px
+                    centroid_error = min(((cx - gx) ** 2 + (cy - gy) ** 2) ** 0.5 for gx, gy in gts)
 
         angular_error = link_loss = None
         handoff_ready = None
@@ -250,7 +253,7 @@ class MainWindow(QMainWindow):
             handoff_ready = is_handoff_ready(angular_error, self.link_cfg.fine_stage_capture_range_urad)
         self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, 0.0,
                                    angular_error_urad=angular_error, link_loss_db=link_loss,
-                                   handoff_ready=handoff_ready)
+                                   handoff_ready=handoff_ready, centroid_error_px=centroid_error)
 
         cam_pan_deg = cam_tilt_deg = None
         if self.camera is not None and self._ref_world_xy is not None:

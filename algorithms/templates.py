@@ -4,6 +4,7 @@ DETECTOR = '''"""{title}
 
 Describe your detector here.
 """
+import cv2
 import numpy as np
 
 from algorithms.api import Detection, Detector
@@ -14,7 +15,7 @@ class {cls}(Detector):
     description = "One line shown in the algorithm pickers."
     # Parameters appear as sliders in the console. Plain values work too: {{"k": 5.0}}
     params = {{
-        "threshold": {{"default": 200, "min": 0, "max": 255, "step": 1, "help": "Brightness cut-off"}},
+        "k": {{"default": 6.0, "min": 1.0, "max": 20.0, "step": 0.5, "help": "Threshold in noise sigmas above the background"}},
     }}
 
     def setup(self):
@@ -25,10 +26,14 @@ class {cls}(Detector):
     def detect(self, image):
         # image: 2D uint8 numpy array. Return every candidate you find;
         # the loop picks the one nearest the tracker's estimate.
-        ys, xs = np.nonzero(image >= self.p["threshold"])
-        if len(xs) == 0:
-            return []
-        return [Detection(float(xs.mean()), float(ys.mean()), score=float(len(xs)))]
+        img = cv2.medianBlur(image, 3)          # removes salt and pepper specks
+        bg = float(np.median(img))
+        sigma = max(1.4826 * float(np.median(np.abs(img.astype(np.float32) - bg))), 1.0)
+        mask = (img > bg + self.p["k"] * sigma).astype(np.uint8)
+        n, labels, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        return [Detection(float(cents[i][0]), float(cents[i][1]), score=float(stats[i, cv2.CC_STAT_AREA]),
+                          area=int(stats[i, cv2.CC_STAT_AREA]))
+                for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= 4]
 '''
 
 TRACKER = '''"""{title}

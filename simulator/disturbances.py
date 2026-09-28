@@ -129,8 +129,13 @@ def apply_atmosphere(img: np.ndarray, mode: str = "clear", rng: Optional[np.rand
     (the spec's "user-defined reduction in contrast and brightness"):
     0 = clear, 1 = the preset as listed, 2 = twice as severe."""
     contrast, brightness = ATMOSPHERE_PRESETS.get(mode, (1.0, 0))
-    contrast = max(0.05, 1.0 - (1.0 - contrast) * strength)
+    contrast = contrast ** strength          # strength 1 = preset exactly, 0 = no change
     brightness = brightness * strength
+    # A full-white beacon must stay faintly visible (>= 40) at any severity:
+    # a severity that turns the whole frame black tests nothing. Before this
+    # floor, low light at severity 2 mapped the beacon to 0.
+    if 255 * contrast + brightness < 40:
+        brightness = 40 - 255 * contrast
     out = img.astype(np.float32) * contrast + brightness
     if mode == "rain":
         out = _apply_rain_streaks(out, rng or np.random.default_rng())

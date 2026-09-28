@@ -52,4 +52,4 @@ def test_robust_background_stats_on_uniform_image():
     img = np.full((480, 640), 50, dtype=np.uint8)
     med, sigma = robust_background_stats(img)
     assert med == 50
-    assert sigma < 1.0
+    assert sigma <= 1.0  # floored at 1 grey level so clipped backgrounds cannot collapse the threshold

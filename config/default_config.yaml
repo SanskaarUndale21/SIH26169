@@ -69,7 +69,7 @@ disturbances:
 # simulator/link_budget.py). None of this changes the tracking algorithm;
 # it's additional reporting.
 link_budget:
-  beam_divergence_urad: 20.0            # 1/e^2 half-angle divergence of the laser beam
+  beam_divergence_urad: 100.0           # ISRO mentor guidance: ~100 urad beacon divergence; 1/e^2 half-angle divergence of the laser beam
   fine_stage_capture_range_urad: 500.0  # angular error below which the fine-pointing stage can take over
   wavelength_nm: 1550.0
   range_km: 1000.0

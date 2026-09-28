@@ -51,6 +51,11 @@ class RunMetrics:
     _loss_count: int = 0
     _proc_sum: float = 0.0
     _proc_count: int = 0
+    # raw detected-centroid error vs truth (sub-pixel accuracy of detection
+    # itself, independent of the tracker's filtering)
+    _cen_sum: float = 0.0
+    _cen_max: float = 0.0
+    _cen_count: int = 0
 
     _acquired: bool = False
     _handoff_ready_seen: bool = False
@@ -62,13 +67,19 @@ class RunMetrics:
                       tracking_error_px: Optional[float], process_time_ms: float,
                       angular_error_urad: Optional[float] = None,
                       link_loss_db: Optional[float] = None,
-                      handoff_ready: Optional[bool] = None):
+                      handoff_ready: Optional[bool] = None,
+                      centroid_error_px: Optional[float] = None):
         if self._sim_start_t is None:
             self._sim_start_t = timestamp
         self.frame_count += 1
         self._proc_sum += process_time_ms
         self._proc_count += 1
         self._last_t = timestamp
+        if centroid_error_px is not None:
+            self._cen_sum += centroid_error_px
+            self._cen_count += 1
+            if centroid_error_px > self._cen_max:
+                self._cen_max = centroid_error_px
 
         if not self._acquired and lock_state == "locked":
             self._acquired = True
@@ -136,6 +147,8 @@ class RunMetrics:
             "lock_retention_rate": round(lock_retention, 4),
             "processing_time_per_frame_ms": round(avg_proc_ms, 3),
             "rmse_px": round(rmse, 3) if rmse is not None else None,
+            "avg_centroid_error_px": round(self._cen_sum / self._cen_count, 4) if self._cen_count else None,
+            "max_centroid_error_px": round(self._cen_max, 4) if self._cen_count else None,
             "re_acquisition_count": len(self.re_acquisition_events),
             "re_acquisition_times_sec": [round(t, 3) for t in reacq_times],
             "target_loss_events": [round(t, 3) for t in self.target_loss_events],

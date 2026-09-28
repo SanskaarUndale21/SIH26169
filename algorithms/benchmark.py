@@ -152,6 +152,7 @@ def summarize(cells: List[dict]) -> dict:
         "fps": _mean(m["fps"] for m in ms),
         "processing_fps": _mean(m["processing_fps"] for m in ms),
         "processing_time_per_frame_ms": _mean(m["processing_time_per_frame_ms"] for m in ms),
+        "avg_centroid_error_px": _mean(m.get("avg_centroid_error_px") for m in ms),
         "detection_rate": _mean(m["detection_rate"] for m in ms),
     }
 

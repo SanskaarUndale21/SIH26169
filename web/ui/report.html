@@ -100,7 +100,8 @@ const LOG_FIELDS = [
   ["simulation_duration_sec", "Simulation duration", "s"], ["fps", "Frames per second", ""],
   ["processing_time_per_frame_ms", "Processing time per frame", "ms"], ["acquisition_time_sec", "Acquisition time", "s"],
   ["avg_tracking_error_px", "Average tracking error", "px"], ["max_tracking_error_px", "Maximum tracking error", "px"],
-  ["rmse_px", "RMS tracking error", "px"], ["lock_retention_rate", "Lock retention", "%"],
+  ["rmse_px", "RMS tracking error", "px"], ["avg_centroid_error_px", "Centroid accuracy, average (raw detection)", "px3"],
+  ["max_centroid_error_px", "Centroid accuracy, worst frame", "px3"], ["lock_retention_rate", "Lock retention", "%"],
   ["re_acquisition_count", "Re-acquisitions", "count"], ["avg_angular_error_urad", "Average pointing error", "µrad"],
   ["avg_pointing_loss_db", "Average pointing loss", "dB"], ["handoff_ready_rate", "Ready for fine stage", "%"],
   ["time_to_handoff_ready_sec", "Time to fine-stage handoff", "s"],
@@ -159,6 +160,7 @@ function renderLog(m) {
     if (v == null) return `<dt>${label}</dt><dd class="faint">–</dd>`;
     if (unit === "%") v = `${fmt(v * 100, 1)}%`;
     else if (unit === "count") v = String(v);
+    else if (unit === "px3") v = `${fmt(v, 3)} px`;
     else v = `${fmt(v)}${unit ? " " + unit : ""}`;
     return `<dt>${label}</dt><dd>${v}</dd>`;
   }).join("") + (m.re_acquisition_times_sec && m.re_acquisition_times_sec.length

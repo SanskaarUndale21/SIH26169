@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 @dataclass
 class LinkBudgetConfig:
-    beam_divergence_urad: float = 20.0   # 1/e^2 half-angle divergence of the laser beam
+    beam_divergence_urad: float = 100.0  # 1/e^2 half-angle divergence of the laser beam
     fine_stage_capture_range_urad: float = 500.0  # angular error below which fine-pointing can take over
     wavelength_nm: float = 1550.0
     range_km: float = 1000.0
@@ -24,7 +24,7 @@ class LinkBudgetConfig:
     def from_config(cls, cfg: dict) -> "LinkBudgetConfig":
         d = cfg.get("link_budget", {})
         return cls(
-            beam_divergence_urad=d.get("beam_divergence_urad", 20.0),
+            beam_divergence_urad=d.get("beam_divergence_urad", 100.0),
             fine_stage_capture_range_urad=d.get("fine_stage_capture_range_urad", 500.0),
             wavelength_nm=d.get("wavelength_nm", 1550.0),
             range_km=d.get("range_km", 1000.0),

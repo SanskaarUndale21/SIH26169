@@ -112,7 +112,7 @@ const $ = id => document.getElementById(id);
 const COLORS = ["#ffb53d", "#8fb4ff", "#d69cff", "#6fe0f0"];
 const DEF = { detector: "dog", tracker: "imm", controller: "pid" };
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let algos = [], scenarios = [], variants = [], seeds = 2, dur = 10, poll = null;
+let algos = [], scenarios = [], variants = [], seeds = 2, dur = 10, poll = null, videoPath = null;
 const byId = id => algos.find(a => a.id === id);
 
 // ---------- variants ----------
@@ -155,8 +155,24 @@ function renderVariants() {
 function renderScenarios() {
   const on = new Set(["default", "noise", "weather", "platform"]);
   $("scen").innerHTML = scenarios.map(s => `<label><input type="checkbox" value="${s.id}" ${on.has(s.id) ? "checked" : ""}>
-    <strong>${esc(s.title)}</strong><span>${esc(s.desc)}</span></label>`).join("");
-  $("scen").querySelectorAll("input").forEach(el => el.onchange = plan);
+    <strong>${esc(s.title)}</strong><span>${esc(s.desc)}</span></label>`).join("") +
+    `<label id="videoCard"><input type="checkbox" value="video" id="videoChk" disabled>
+      <strong>Your video</strong><span id="videoDesc">Benchmark a recorded .mp4. No ground truth, so it is scored on acquisition, lock and detections.
+      <button class="btn quiet" type="button" id="videoPick" style="padding:3px 10px;margin-top:6px">Choose .mp4</button></span>
+      <input type="file" id="videoFile" accept=".mp4,video/mp4" hidden></label>`;
+  $("scen").querySelectorAll("input[type=checkbox]").forEach(el => el.onchange = plan);
+  $("videoPick").onclick = ev => { ev.preventDefault(); $("videoFile").click(); };
+  $("videoFile").onchange = async () => {
+    const f = $("videoFile").files[0]; if (!f) return;
+    $("videoDesc").firstChild.textContent = `Uploading ${f.name}. `;
+    const form = new FormData(); form.append("file", f);
+    try {
+      const d = await api("/api/control/upload_video", { method: "POST", body: form });
+      videoPath = d.path;
+      $("videoDesc").firstChild.textContent = `${d.name}, ready. Scored on acquisition, lock and detections (no ground truth). `;
+      $("videoChk").disabled = false; $("videoChk").checked = true; plan();
+    } catch (e) { $("videoDesc").firstChild.textContent = "Upload failed. "; toast(e.message, true); }
+  };
 }
 function seg(host, options, current, set) {
   host.innerHTML = options.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${v === current}">${l}</button>`).join("");
@@ -177,7 +193,7 @@ function plan() {
 $("runBtn").onclick = async () => {
   try {
     await api("/api/bench/start", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ variants, scenarios: chosenScenarios(), seeds, duration_s: dur }) });
+      body: JSON.stringify({ variants, scenarios: chosenScenarios(), seeds, duration_s: dur, video_path: videoPath }) });
     watch();
   } catch (e) { toast(e.message, true); }
 };
@@ -207,6 +223,7 @@ const ROWS = [
   ["acquisition_time_sec", "Acquisition time, mean", v => `${fmt(v)} s`, "min", 2],
   ["avg_tracking_error_px", "Tracking error, mean", v => `${fmt(v)} px`, "min", 10],
   ["max_tracking_error_px", "Tracking error, worst frame", v => `${fmt(v, 1)} px`, "min", null],
+  ["avg_centroid_error_px", "Centroid accuracy (raw detection)", v => `${fmt(v, 3)} px`, "min", null],
   ["target_loss_pct", "Target loss, mean", v => `${fmt(v, 2)}%`, "min", 5],
   ["worst_reacquisition_sec", "Re-acquisition, worst", v => `${fmt(v)} s`, "min", 1],
   ["processing_fps", "Processing speed (algorithms only)", v => `${fmt(v, 0)} FPS`, "max", 20],
@@ -246,7 +263,7 @@ function show(r) {
       if (!c) return `<td class="faint">waiting</td>`;
       if (c.errors === c.runs) return `<td class="cell-fail">crashed</td>`;
       return `<td><span class="chip ${c.passes === c.runs ? "pass" : "fail"}">${c.passes}/${c.runs} pass</span>
-        <span class="sub">${c.acquisition_time_sec == null ? "never locked" : fmt(c.acquisition_time_sec) + " s"}, ${fmt(c.avg_tracking_error_px)} px, ${fmt(c.target_loss_pct, 1)}% loss</span></td>`;
+        <span class="sub">${c.acquisition_time_sec == null ? "never locked" : fmt(c.acquisition_time_sec) + " s"}, ${sc.id === "video" ? `${fmt((c.detection_rate ?? 0) * 100, 0)}% detected` : fmt(c.avg_tracking_error_px) + " px"}, ${fmt(c.target_loss_pct, 1)}% loss</span></td>`;
     }).join("")}</tr>`).join("")}</tbody>`;
   // chart
   $("chartLegend").innerHTML = vs.map((v, i) => `<span><i style="background:${COLORS[i]}"></i>${esc(v.name)}</span>`).join("");

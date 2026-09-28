@@ -90,6 +90,7 @@ class TrackingRunner:
             proc_ms = (time.perf_counter() - t0) * 1000.0
 
             tracking_error = self._tracking_error(telemetry)
+            centroid_error = self._centroid_error(telemetry)
             angular_error = link_loss = None
             handoff_ready = None
             if tracking_error is not None and frame.fov_deg is not None:
@@ -98,7 +99,7 @@ class TrackingRunner:
                 handoff_ready = is_handoff_ready(angular_error, self.link_cfg.fine_stage_capture_range_urad)
             self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, proc_ms,
                                        angular_error_urad=angular_error, link_loss_db=link_loss,
-                                       handoff_ready=handoff_ready)
+                                       handoff_ready=handoff_ready, centroid_error_px=centroid_error)
             self.telemetry_log.append(telemetry)
             self.frame_log.add(self._make_frame_record(telemetry, frame))
             if self.on_telemetry:
@@ -122,6 +123,18 @@ class TrackingRunner:
             return None
         px, py = telemetry.predicted_px
         return min(math.hypot(px - gx, py - gy) for gx, gy in gts)
+
+    def _centroid_error(self, telemetry: Telemetry) -> Optional[float]:
+        """Error of the raw detected centroid (before any filtering) against
+        the nearest true beacon position: the detector's own sub-pixel
+        accuracy. None when nothing was detected or there is no truth."""
+        if self.ground_truth_fn is None or telemetry.centroid_px is None:
+            return None
+        gts = self.ground_truth_fn()
+        if not gts:
+            return None
+        cx, cy = telemetry.centroid_px
+        return min(math.hypot(cx - gx, cy - gy) for gx, gy in gts)
 
     def _make_frame_record(self, telemetry: Telemetry, frame) -> FrameRecord:
         """Builds one real FrameRecord for this frame. Every simulator-
