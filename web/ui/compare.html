@@ -369,7 +369,7 @@ function segStr(host, options, current, set) {
   });
 }
 function pPlan() { $("pPlan").textContent = `${pN} passes, each run with and without learning. A pass stops at first lock (40 s max).`; }
-segStr($("pScen"), [["inter_sat", "Inter-satellite (2.5° repeating error)"], ["sat_ground", "Satellite to ground (σ 0.2°)"]], pScen, v => { pScen = v; });
+segStr($("pScen"), [["inter_sat", "Inter-satellite (4° repeating error)"], ["sat_ground", "Satellite to ground (σ 0.2°)"]], pScen, v => { pScen = v; });
 segStr($("pN"), [["5", "5"], ["8", "8"], ["12", "12"], ["20", "20"]], "8", v => { pN = +v; pPlan(); });
 pPlan();
 $("pRun").onclick = async () => {
@@ -412,7 +412,7 @@ function drawPasses(r) {
   const maxV = Math.max(2.5, ...vals) * 1.1, padL = 40, padB = 26, padT = 10;
   const sx = i => padL + (i + 0.5) * (W - padL) / r.passes, sy = v => padT + (1 - v / maxV) * (H - padT - padB);
   ctx.font = "11px Archivo, system-ui"; ctx.fillStyle = "#6c7aa3"; ctx.strokeStyle = "rgba(143,164,222,0.12)";
-  for (let i = 0; i <= 4; i++) { const v = maxV * i / 4; ctx.beginPath(); ctx.moveTo(padL, sy(v)); ctx.lineTo(W, sy(v)); ctx.stroke(); ctx.fillText(`${fmt(v, 0)} s`, 2, sy(v) + 4); }
+  for (let i = 0; i <= 4; i++) { const v = maxV * i / 4; ctx.beginPath(); ctx.moveTo(padL, sy(v)); ctx.lineTo(W, sy(v)); ctx.stroke(); ctx.fillText(`${fmt(v, 1)} s`, 2, sy(v) + 4); }
   ctx.strokeStyle = "rgba(255,110,87,0.7)"; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(padL, sy(2)); ctx.lineTo(W, sy(2)); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = "#ff9a88"; ctx.fillText("2 s target", W - 60, sy(2) - 5);
   for (const [arm, col] of [["raw", "#8fb4ff"], ["learned", "#37d8a8"]]) {
@@ -421,6 +421,16 @@ function drawPasses(r) {
       pen ? ctx.lineTo(sx(i), sy(v)) : ctx.moveTo(sx(i), sy(v)); pen = true; });
     ctx.stroke();
     r.rows.forEach((x, i) => { const v = x[arm].acquisition_time_sec; if (v != null) { ctx.beginPath(); ctx.arc(sx(i), sy(v), 3.5, 0, 7); ctx.fill(); } });
+  }
+  // passes that never locked: a cross at the top, in the arm's colour
+  for (const [arm, col, dx] of [["raw", "#8fb4ff", -5], ["learned", "#37d8a8", 5]]) {
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    r.rows.forEach((x, i) => { if (x[arm].acquisition_time_sec != null) return;
+      const cx = sx(i) + dx, cy = padT + 6; ctx.beginPath(); ctx.moveTo(cx - 5, cy - 5); ctx.lineTo(cx + 5, cy + 5);
+      ctx.moveTo(cx + 5, cy - 5); ctx.lineTo(cx - 5, cy + 5); ctx.stroke(); });
+  }
+  if (r.rows.some(x => x.raw.acquisition_time_sec == null || x.learned.acquisition_time_sec == null)) {
+    ctx.fillStyle = "#a3aecd"; ctx.fillText("× = not found within the pass", padL + 6, padT + 10);
   }
   ctx.fillStyle = "#a3aecd"; r.rows.forEach((x, i) => ctx.fillText(String(x.pass), sx(i) - 3, H - 8));
 }

@@ -80,6 +80,11 @@ const S = [
     ["Camera control", "", "PID pointing loop, spiral then raster search when the beacon is lost", DONE],
     ["Disturbance injection", "", "Noise, jitter, weather, turbulence and platform drift in the camera feed", DONE],
     ["Real-time performance display", "", "Live page: camera feed, lock state, error chart, spec scores", DONE],
+    ["AI-based detection", "Mentor guidance: learning-based detection preferred", "Learned CNN detector trained on simulator frames under every disturbance; the only built-in detector that locks with all disturbances at maximum. Classical detector stays default where it performs better", OPT],
+    ["On-board computer pointing cue", "Mentor guidance: the OBC gives the beacon position with uncertainty; inter-satellite links need scanning", "Camera slews to the predicted direction and scans out to 3 sigma; satellite-to-ground and inter-satellite scenarios", DONE],
+    ["Multi-pass learning", "Mentor guidance: predict the next pass to cut acquisition time", "Learns the link's repeating cue error from each acquisition and corrects the next pass (Compare, Multi-pass learning)", DONE],
+    ["Sub-pixel accuracy", "Mentor guidance: tracking needs sub-pixel accuracy", "Raw detected centroid about 0.4 px from truth, reported in every log and comparison", DONE],
+    ["Beam divergence", "Mentor guidance: about 100 µrad", "Default beacon divergence 100 µrad for pointing-loss reporting", DONE],
     ["Platform for algorithm development", "Background: an accessible platform to develop and validate tracking algorithms", "Plug in your own detector, tracker or controller, check it, and compare it against the built-ins on identical seeded scenarios", DONE],
   ]},
   { id: "deliver", title: "Deliverables", rows: [
