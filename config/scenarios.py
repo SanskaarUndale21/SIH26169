@@ -21,6 +21,12 @@ SCENARIOS = [
     {"id": "fast", "title": "Fast weave", "desc": "Sinusoidal path at 120 px/s, small 6 px beacon", "values": {
         "target/motion": "sinusoidal", "target/motion_params/sinusoidal/speed_px_s": 120,
         "target/size_px/0": 6, "target/size_px/1": 6}},
+    {"id": "sat_ground", "title": "Satellite to ground, cued", "desc": "Beacon anywhere; OBC cue within about 0.2 deg", "values": {
+        "cue/enabled": True, "cue/sigma_deg": 0.2, "cue/bias_deg": 0.1, "target/initial_location": "anywhere",
+        "target/motion": "straight_line", "target/motion_params/straight_line/speed_px_s": 20}},
+    {"id": "inter_sat", "title": "Inter-satellite, cued", "desc": "OBC cue 4 deg off every pass (ephemeris error), so the camera must scan", "values": {
+        "cue/enabled": True, "cue/sigma_deg": 0.4, "cue/bias_deg": 4.0, "target/initial_location": "anywhere",
+        "target/motion": "straight_line", "target/motion_params/straight_line/speed_px_s": 20}},
     {"id": "leo", "title": "LEO crosslink", "desc": "Orbit-derived motion between two satellites", "values": {
         "scenario_preset": "leo_leo_crosslink"}},
 ]

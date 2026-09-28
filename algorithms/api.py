@@ -59,6 +59,9 @@ class AlgoContext:
     max_tilt_deg_s: float = 5.0
     frame_rate_hz: float = 30.0
     config: Dict[str, Any] = field(default_factory=dict)  # full run config
+    # On-board computer pointing cue, or None: .at(t) -> (pan, tilt) degrees
+    # from the boresight zero, and .sigma_deg. Filled in before the first frame.
+    cue: Any = None
 
     @property
     def px_per_deg(self) -> Optional[Tuple[float, float]]:

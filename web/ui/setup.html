@@ -186,7 +186,7 @@ import { api, toast, MOTION_NAMES, SLOT_NAMES } from "/static/app.js";
 const STEPS = [
   { id: "source", title: "Source", desc: "Scene or video" },
   { id: "camera", title: "Scene and camera", desc: "Sensor and gimbal", groups: ["Scene", "Camera", "PTZ"] },
-  { id: "target", title: "Beacon", desc: "Shape and motion", groups: ["Target", "Scenario Preset"] },
+  { id: "target", title: "Beacon", desc: "Shape, motion, cue", groups: ["Target", "Pointing Cue", "Scenario Preset"] },
   { id: "disturb", title: "Disturbances", desc: "Noise and weather", groups: ["Noise", "Jitter", "Atmosphere", "Turbulence", "Platform Motion"] },
   { id: "tracking", title: "Algorithms", desc: "Detect, track, point", groups: ["Algorithms", "Detector", "IMM Tracker", "PID Control", "Link Budget"] },
 ];
@@ -195,12 +195,14 @@ const MOTION_GROUP = {
   random: "Motion: Random Walk", spiral: "Motion: Spiral", sinusoidal: "Motion: Sinusoidal", user_defined: "Motion: User-defined",
 };
 const GROUP_TITLES = {
+  "Pointing Cue": "On-board computer pointing cue",
   PTZ: "Pan-tilt gimbal", "Scenario Preset": "Orbital scenario", "Platform Motion": "Platform motion",
   "IMM Tracker": "Motion filter (IMM)", "PID Control": "Pointing loop (PID)", "Link Budget": "Link budget reporting",
   Detector: "Beacon detector",
 };
 const GROUP_NOTES = {
   "Scenario Preset": "Replaces the motion above with a path derived from real orbital mechanics.",
+  "Pointing Cue": "On orbit the satellite computer predicts where the other terminal is. With a cue, the camera slews there first, then scans out to 3 sigma around it.",
   "Link Budget": "Only changes how pointing error is reported in microradians and dB, not how tracking works.",
   Turbulence: "Heavy to compute: expect lower frame rates while it is on.",
 };
@@ -570,6 +572,7 @@ function renderSummary() {
     if (values["disturbances/atmosphere/mode"] !== "clear") dist.push(values["disturbances/atmosphere/mode"].replace("_", " "));
     if (values["disturbances/turbulence/enabled"]) dist.push("turbulence");
     if (values["disturbances/platform_motion/enabled"]) dist.push("platform drift");
+    if (values["cue/enabled"]) rows.push(["Pointing cue", `On, ±${values["cue/sigma_deg"]}° (1σ)${values["cue/bias_deg"] ? `, ${values["cue/bias_deg"]}° systematic` : ""}`]);
     rows.push(["Disturbances", dist.length ? dist.join(", ") : "None"]);
   }
   const custom = Object.keys(SLOT_NAMES).filter(sl => { const a = algoList.find(x => x.id === values[`algorithms/${sl}/id`]); return a && !a.default; })

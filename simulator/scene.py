@@ -34,7 +34,13 @@ class Scene:
         n = tcfg.get("num_targets", 1)
         for i in range(n):
             loc = tcfg.get("initial_location", "random")
-            if loc == "random":
+            if loc == "anywhere":
+                # Anywhere on the screen (10% margin): used with an OBC pointing
+                # cue, which is what lets the camera find a beacon far from
+                # the starting boresight.
+                x0 = random.uniform(0.1, 0.9) * scene.width
+                y0 = random.uniform(0.1, 0.9) * scene.height
+            elif loc == "random":
                 # Design choice (documented, not spec-mandated): spawn within
                 # a bounded radius of screen centre rather than uniformly
                 # across the full 2000x2000 canvas. With the camera's narrow

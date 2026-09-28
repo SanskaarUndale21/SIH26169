@@ -124,3 +124,55 @@ class SpiralSweepDriver:
             pan_rate = tilt_rate = 0.0
         self._pos = (self._pos[0] + pan_rate * dt, self._pos[1] + tilt_rate * dt)
         return pan_rate, tilt_rate
+
+
+@dataclass
+class CuedSearchDriver:
+    """Search around an on-board computer (OBC) pointing cue.
+
+    Steers at full slew rate to the cued direction, then spirals outward
+    around it with rings spaced at most `ring_step_deg` apart (under one
+    field of view, so no gap is left), out to `extent_deg` (3 sigma of the
+    cue uncertainty). The cue is re-read every step, so a moving predicted
+    direction is followed. Works in absolute gimbal angles (the gimbal's own
+    encoders), which a real pointing assembly always has. `exhausted` turns
+    True once the whole 3 sigma area has been covered; the caller then falls
+    back to a full-field raster."""
+    max_speed: float
+    ring_step_deg: float
+    extent_deg: float
+    angle_step_deg: float = 30.0
+    arrive_tol_deg: float = 0.3
+    _radius_deg: float = 0.0
+    _angle_deg: float = 0.0
+    exhausted: bool = False
+
+    def reset(self):
+        self._radius_deg = 0.0
+        self._angle_deg = 0.0
+        self.exhausted = False
+
+    def next_rate(self, pos_deg: Tuple[float, float], cue_deg: Tuple[float, float], dt: float) -> Tuple[float, float]:
+        import math
+        def waypoint():
+            th = math.radians(self._angle_deg)
+            return cue_deg[0] + self._radius_deg * math.cos(th), cue_deg[1] + self._radius_deg * math.sin(th)
+        wx, wy = waypoint()
+        dx, dy = wx - pos_deg[0], wy - pos_deg[1]
+        dist = math.hypot(dx, dy)
+        if dist < self.arrive_tol_deg:
+            # advance along the spiral; keep angular spacing roughly constant in arc length
+            step = self.angle_step_deg if self._radius_deg < 1e-6 else min(
+                self.angle_step_deg, math.degrees(self.ring_step_deg / max(self._radius_deg, 1e-6)))
+            self._angle_deg += step
+            self._radius_deg += self.ring_step_deg * step / 360.0
+            if self._radius_deg > self.extent_deg:
+                self.exhausted = True
+            wx, wy = waypoint()
+            dx, dy = wx - pos_deg[0], wy - pos_deg[1]
+            dist = math.hypot(dx, dy)
+        if dist <= 1e-9:
+            return 0.0, 0.0
+        # slow down on arrival so we don't overshoot the waypoint every frame
+        speed = min(self.max_speed, dist / max(dt, 1e-6))
+        return speed * dx / dist, speed * dy / dist

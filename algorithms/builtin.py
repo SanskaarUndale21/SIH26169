@@ -51,6 +51,68 @@ class ThresholdCentroidDetector(Detector):
         return out
 
 
+class LearnedDetector(Detector):
+    name = "Learned CNN detector (experimental)"
+    description = ("A small convolutional network, trained on simulator frames under every disturbance, scores "
+                   "candidate spots and regresses the beacon centre. It is the only built-in detector that still "
+                   "locks when every disturbance is at maximum, but it drops more frames than the classical detector "
+                   "under ordinary heavy noise, so it is not the default. Runs through OpenCV, no torch needed. "
+                   "Retrain with tools/train_detector.py.")
+    params = {
+        "min_score": {"default": 0.6, "min": 0.05, "max": 0.99, "step": 0.05,
+                      "help": "Network confidence needed to accept a spot as the beacon"},
+        "max_proposals": {"default": 48, "min": 4, "max": 200, "step": 4,
+                          "help": "Candidate spots scored per frame (more = slower, fewer misses)"},
+        "refine": {"default": True, "help": "Refine the network's position with a local intensity centroid"},
+    }
+
+    def setup(self):
+        from algorithms.api import AlgorithmError
+        from algorithms.learned import OnnxBeaconNet
+        try:
+            self.net = OnnxBeaconNet()
+        except FileNotFoundError as exc:
+            raise AlgorithmError(f"{exc}. Train it with: python tools/train_detector.py")
+
+    def detect(self, image):
+        from algorithms.learned import noise_stats, patches, propose
+        img = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        pts = propose(img, max_n=int(self.p["max_proposals"]))
+        if len(pts) == 0:
+            return []
+        out = self.net(patches(img, pts), pad_to=int(self.p["max_proposals"]))
+        score = 1.0 / (1.0 + np.exp(-out[:, 0]))
+        keep = np.nonzero(score >= self.p["min_score"])[0]
+        dets = []
+        if len(keep) and self.p["refine"]:
+            smooth = cv2.medianBlur(img, 3)
+            med, sigma = noise_stats(smooth)
+            floor = med + 2.0 * sigma
+            r = max(self.ctx.target_size_px) // 2 + 3
+        for i in keep[np.argsort(-score[keep])]:
+            x = float(pts[i, 0] + np.clip(out[i, 1], -6, 6))
+            y = float(pts[i, 1] + np.clip(out[i, 2], -6, 6))
+            if self.p["refine"]:
+                x, y = _local_centroid(smooth, x, y, floor, r)
+            if all((x - d.x) ** 2 + (y - d.y) ** 2 > 16 for d in dets):  # merge duplicates within 4 px
+                dets.append(Detection(x, y, score=float(score[i])))
+        return dets
+
+
+def _local_centroid(smooth, x, y, floor, r):
+    """Intensity centroid of pixels above the frame's noise floor in a window
+    sized to the beacon around (x, y); falls back to (x, y) with no signal."""
+    h, w = smooth.shape
+    x0, x1 = max(0, int(round(x)) - r), min(w, int(round(x)) + r + 1)
+    y0, y1 = max(0, int(round(y)) - r), min(h, int(round(y)) + r + 1)
+    win = np.clip(smooth[y0:y1, x0:x1].astype(np.float32) - floor, 0, None)
+    tot = win.sum()
+    if tot <= 0:
+        return x, y
+    ys, xs = np.mgrid[y0:y1, x0:x1]
+    return float((xs * win).sum() / tot), float((ys * win).sum() / tot)
+
+
 # ----------------------------------------------------------------- trackers
 
 def _turn_rate(v1, v2, dt):
@@ -186,7 +248,7 @@ class ProportionalController(Controller):
 
 
 BUILTINS = {
-    "detector": {"dog": DoGDetector, "threshold": ThresholdCentroidDetector},
+    "detector": {"dog": DoGDetector, "cnn": LearnedDetector, "threshold": ThresholdCentroidDetector},
     "tracker": {"imm": IMMTrackerAlgo, "kalman_cv": KalmanCVTracker, "hold_last": HoldLastTracker},
     "controller": {"pid": PIDController, "p_only": ProportionalController},
 }

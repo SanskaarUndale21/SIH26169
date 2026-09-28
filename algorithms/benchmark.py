@@ -32,6 +32,7 @@ from config.scenarios import BY_ID as SCENARIOS
 from control.run_loop import TrackingRunner
 from perception.frame_source import SimulatorFrameSource, VideoFileFrameSource
 from simulator.camera_model import CameraModel, PTZActuator
+from simulator.obc_model import cue_from_config
 from simulator.disturbances import DisturbanceConfig
 from simulator.renderer import SimulatorEngine
 from simulator.scene import Scene
@@ -91,10 +92,13 @@ def judge(m: dict, has_truth: bool = True) -> dict:
     return verdicts
 
 
-def run_single(cfg: dict, seed: int, duration_s: float, video_path: Optional[str] = None) -> dict:
+def run_single(cfg: dict, seed: int, duration_s: float, video_path: Optional[str] = None,
+               learner=None, stop_on_lock: bool = False) -> dict:
+    """learner: optional algorithms.pass_learner.PassLearner; corrects the
+    OBC cue before the run and learns from the acquisition after it."""
     random.seed(seed)
     np.random.seed(seed)
-    camera = ptz = None
+    camera = ptz = cue = None
     try:
         if video_path:
             source = VideoFileFrameSource(video_path)
@@ -107,12 +111,21 @@ def run_single(cfg: dict, seed: int, duration_s: float, video_path: Optional[str
                                  world_x=cfg["screen"]["width"] / 2, world_y=cfg["screen"]["height"] / 2)
             ptz = PTZActuator(camera, cfg["ptz"]["max_pan_speed_deg_s"], cfg["ptz"]["max_tilt_speed_deg_s"])
             engine = SimulatorEngine(scene, camera, DisturbanceConfig.from_config(cfg), seed=seed)
+            cue = cue_from_config(cfg, scene, camera.world_px_per_deg, rng=random.Random(seed * 7919 + 1))
+            if cue is not None and learner is not None:
+                learner.apply(cue)
             fps = cam_cfg["update_rate_hz"]
             source = SimulatorFrameSource(engine, fps=fps)
         gt = (lambda: source.last_ground_truth) if camera is not None else None
-        runner = TrackingRunner(cfg, source, camera=camera, ptz=ptz, ground_truth_fn=gt)
-        result = runner.run(max_frames=int(duration_s * fps))
+        runner = TrackingRunner(cfg, source, camera=camera, ptz=ptz, ground_truth_fn=gt, cue=cue)
+        stop = (lambda: runner.metrics.acquisition_time_sec is not None) if stop_on_lock else None
+        result = runner.run(max_frames=int(duration_s * fps), stop_flag=stop)
         m = derived(result.metrics)
+        if cue is not None:
+            m["cue_error_deg"] = round(cue.error_deg(0.0), 4)
+            m["cue_sigma_deg"] = round(cue.sigma, 4)
+            if learner is not None and runner.acquired_direction_deg is not None:
+                learner.observe(cue, runner.acquired_direction_deg, runner.acquired_time)
         log = result.telemetry_log
         m["detection_rate"] = round(sum(t.detected for t in log) / len(log), 4) if log else 0.0
         return {"metrics": m, "verdicts": judge(m, has_truth=camera is not None), "error": None}
@@ -252,6 +265,93 @@ def _algo_name(aid: str) -> str:
         return registry.get(aid).display_name()
     except AlgorithmError:
         return aid
+
+
+# ------------------------------------------------------- multi-pass learning
+
+class PassSeries:
+    """Repeated passes of one link, run twice with identical seeds: once
+    using the raw OBC cue every pass, once with algorithms/pass_learner.py
+    correcting the cue from earlier passes. Records acquisition time per
+    pass for both arms."""
+
+    def __init__(self, scenario: str, passes: int, out_dir: str, algorithms: Optional[dict] = None,
+                 max_pass_s: float = 40.0, link_seed: int = 1):
+        from algorithms.pass_learner import PassLearner
+        self.id = time.strftime("passes_%Y%m%d_%H%M%S")
+        self.scenario = scenario if scenario in SCENARIOS else "inter_sat"
+        self.passes = max(2, min(int(passes), 30))
+        self.max_pass_s = float(max_pass_s)
+        self.link_seed = int(link_seed)
+        self.algorithms = algorithms or {s: {"id": registry.DEFAULTS[s], "params": {}} for s in SLOTS}
+        self.out_dir = out_dir
+        self.learner = PassLearner(link=f"link-{self.link_seed}", prior_sigma_deg=2.0)
+        self.rows: List[dict] = []
+        self.done = False
+        self.cancelled = False
+        self.error: Optional[str] = None
+        self.started = time.time()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def cancel(self):
+        self.cancelled = True
+
+    def _run(self):
+        try:
+            values = dict(SCENARIOS[self.scenario]["values"])
+            values["cue/enabled"] = True
+            values["cue/link_seed"] = self.link_seed
+            for p in range(self.passes):
+                row = {"pass": p + 1}
+                for arm, learner in (("raw", None), ("learned", self.learner)):
+                    if self.cancelled:
+                        return
+                    cfg = build_config(values, self.algorithms)
+                    r = run_single(cfg, 4000 + p, self.max_pass_s, learner=learner, stop_on_lock=True)
+                    m = r["metrics"] or {}
+                    row[arm] = {"acquisition_time_sec": m.get("acquisition_time_sec"),
+                                "cue_error_deg": m.get("cue_error_deg"), "search_sigma_deg": m.get("cue_sigma_deg"),
+                                "error": r["error"]}
+                row["bias_estimate_deg"] = list(self.learner.bias)
+                row["bias_sigma_deg"] = round(self.learner.P ** 0.5, 4)
+                self.rows.append(row)
+        except Exception as exc:
+            self.error = f"{exc}\n{traceback.format_exc(limit=5)}"
+        finally:
+            self.done = True
+            try:
+                os.makedirs(self.out_dir, exist_ok=True)
+                with open(os.path.join(self.out_dir, f"{self.id}.json"), "w") as f:
+                    json.dump(self.result(), f, indent=1, default=str)
+            except Exception:
+                pass
+
+    def result(self) -> dict:
+        def mean(arm, rows):
+            v = [r[arm]["acquisition_time_sec"] for r in rows if r[arm]["acquisition_time_sec"] is not None]
+            return round(statistics.fmean(v), 3) if v else None
+        def mean_capped(arm, rows):  # a pass that never locks counts as the full pass length
+            v = [r[arm]["acquisition_time_sec"] if r[arm]["acquisition_time_sec"] is not None else self.max_pass_s
+                 for r in rows]
+            return round(statistics.fmean(v), 3) if v else None
+        def found(arm):
+            return sum(1 for r in self.rows if r[arm]["acquisition_time_sec"] is not None)
+        def cue_err(arm, rows):
+            v = [r[arm]["cue_error_deg"] for r in rows if r[arm]["cue_error_deg"] is not None]
+            return round(statistics.fmean(v), 3) if v else None
+        late = self.rows[len(self.rows) // 2:]
+        return {"id": self.id, "scenario": self.scenario, "title": SCENARIOS[self.scenario]["title"],
+                "passes": self.passes, "progress": len(self.rows), "done": self.done, "cancelled": self.cancelled,
+                "error": self.error, "max_pass_s": self.max_pass_s, "rows": self.rows,
+                "mean_raw": mean("raw", self.rows), "mean_learned": mean("learned", self.rows),
+                "late_mean_raw": mean("raw", late), "late_mean_learned": mean("learned", late),
+                "found_raw": found("raw"), "found_learned": found("learned"),
+                "mean_capped_raw": mean_capped("raw", self.rows), "mean_capped_learned": mean_capped("learned", self.rows),
+                "late_cue_error_raw": cue_err("raw", late), "late_cue_error_learned": cue_err("learned", late)}
 
 
 # --------------------------------------------------------------- validation

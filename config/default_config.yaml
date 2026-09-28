@@ -74,6 +74,16 @@ link_budget:
   wavelength_nm: 1550.0
   range_km: 1000.0
 
+# On-board computer pointing cue (simulator/obc_model.py). When enabled the
+# camera first slews to the predicted beacon direction, then scans out to 3
+# sigma around it. sigma_deg: per-pass random error; bias_deg: systematic
+# error of the link (same every pass); link_seed: which link.
+cue:
+  enabled: false
+  sigma_deg: 0.5
+  bias_deg: 0.0
+  link_seed: 1
+
 # Named, physically-parametrized scenarios (simulator/scenario_presets.py):
 # leo_leo_crosslink | leo_ground_downlink | geo_ground. Selecting one
 # overrides target.motion/motion_params and link_budget with values

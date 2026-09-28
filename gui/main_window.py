@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 
+from simulator.obc_model import cue_from_config
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
                                 QSplitter, QStatusBar, QTabWidget, QVBoxLayout, QWidget)
@@ -175,6 +176,7 @@ class MainWindow(QMainWindow):
 
     def start_run(self):
         cfg = self.config_panel.build_config()
+        self._cue = None
         try:
             if self.config_panel.is_video_mode():
                 if not self.config_panel.video_path:
@@ -194,6 +196,7 @@ class MainWindow(QMainWindow):
                 ptz = PTZActuator(self.camera, cfg["ptz"]["max_pan_speed_deg_s"], cfg["ptz"]["max_tilt_speed_deg_s"])
                 dcfg = DisturbanceConfig.from_config(cfg)
                 engine = SimulatorEngine(scene, self.camera, dcfg)
+                self._cue = cue_from_config(cfg, scene, self.camera.world_px_per_deg)
                 self.frame_source = SimulatorFrameSource(engine, fps=cam_cfg["update_rate_hz"])
                 self.actuator = SimulatorActuator(ptz)
                 self._ref_world_xy = (cfg["screen"]["width"] / 2, cfg["screen"]["height"] / 2)
@@ -203,6 +206,8 @@ class MainWindow(QMainWindow):
 
         self.pipeline = None
         self.stepper = PointingStepper(cfg, self.camera) if self.camera is not None else None
+        if self.stepper is not None and getattr(self, "_cue", None) is not None and not self.config_panel.is_video_mode():
+            self.stepper.set_cue(self._cue)
         self.link_cfg = LinkBudgetConfig.from_config(cfg)
         self.metrics = RunMetrics()
         self.frame_log = FrameLogWriter()

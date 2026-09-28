@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 
 from algorithms import registry
 from algorithms.api import AlgorithmError, check_point
-from control.search_driver import RasterSweepDriver, SpiralSweepDriver
+from control.search_driver import CuedSearchDriver, RasterSweepDriver, SpiralSweepDriver
 
 
 class PointingStepper:
@@ -56,8 +56,36 @@ class PointingStepper:
         # searching with no detection at all, fall back to the raster
         # driver: slower to a first hit on average, but bounded worst case.
         self.SEARCH_HANDOFF_S = 3.0
+
+        # Optional OBC pointing cue (simulator/obc_model.py): when set, the
+        # initial search slews to the predicted direction and spirals out to
+        # 3 sigma around it before any full-field raster.
+        self.cue = None
+        self.cued_search: Optional[CuedSearchDriver] = None
+        self._ref_world_xy = None
+        if camera is not None:
+            scr = config.get("screen", {})
+            self._ref_world_xy = (scr.get("width", 2000) / 2, scr.get("height", 2000) / 2)
         self._searching_since_t: Optional[float] = None
         self._prev_lock_state: Optional[str] = None
+
+    def set_cue(self, cue):
+        """cue: object with .at(t) -> (pan_deg, tilt_deg) and .sigma (deg)."""
+        self.cue = cue
+        if cue is None or self.camera is None:
+            self.cued_search = None
+            return
+        fov_min = min(self.camera.fov_x_deg, self.camera.fov_y_deg)
+        max_speed = min(self.raster_search.max_pan_speed, self.raster_search.max_tilt_speed)
+        self.cued_search = CuedSearchDriver(max_speed=max_speed, ring_step_deg=0.8 * fov_min,
+                                            extent_deg=max(3.0 * cue.sigma, fov_min))
+
+    def boresight_deg(self) -> Tuple[float, float]:
+        """Absolute gimbal pan/tilt (deg) relative to the boresight zero, as
+        the gimbal's own encoders would report it."""
+        c = self.camera
+        return ((c.world_x - self._ref_world_xy[0]) / c.world_px_per_deg,
+                (c.world_y - self._ref_world_xy[1]) / c.world_px_per_deg)
 
     def step(self, telemetry, frame_width: int, frame_height: int, dt_ctrl: float) -> Tuple[float, float]:
         if telemetry.lock_state in ("locked", "acquiring"):
@@ -81,8 +109,13 @@ class PointingStepper:
             if self._searching_since_t is None:
                 self._searching_since_t = telemetry.timestamp
                 self.raster_search.reset()
+                if self.cued_search is not None:
+                    self.cued_search.reset()
             elapsed = telemetry.timestamp - self._searching_since_t
-            if elapsed < self.SEARCH_HANDOFF_S:
+            if self.cued_search is not None and not self.cued_search.exhausted:
+                pan_rate, tilt_rate = self.cued_search.next_rate(self.boresight_deg(),
+                                                                 self.cue.at(telemetry.timestamp), dt_ctrl)
+            elif elapsed < self.SEARCH_HANDOFF_S and self.cued_search is None:
                 pan_rate, tilt_rate = self.initial_search.next_rate(dt_ctrl)
             else:
                 pan_rate, tilt_rate = self.raster_search.next_rate(dt_ctrl)

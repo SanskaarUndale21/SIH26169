@@ -533,10 +533,45 @@ def api_bench_cancel() -> JSONResponse:
     return JSONResponse({"cancelled": True})
 
 
+_passes = {"job": None}
+
+
+@app.post("/api/passes/start")
+def api_passes_start(payload: dict) -> JSONResponse:
+    from algorithms.benchmark import PassSeries
+    with _bench_lock:
+        job = _passes["job"]
+        if job is not None and not job.done:
+            raise HTTPException(status_code=409, detail="A multi-pass experiment is already running")
+        if live_engine.is_running():
+            raise HTTPException(status_code=409, detail="A live run is in progress. Stop it first")
+        job = PassSeries(payload.get("scenario", "inter_sat"), int(payload.get("passes", 8)), str(LOGS_DIR),
+                         algorithms=payload.get("algorithms"), link_seed=int(payload.get("link_seed", 1)))
+        _passes["job"] = job.start()
+    return JSONResponse({"id": job.id})
+
+
+@app.get("/api/passes/status")
+def api_passes_status() -> JSONResponse:
+    job = _passes["job"]
+    return JSONResponse(job.result() if job is not None else None)
+
+
+@app.post("/api/passes/cancel")
+def api_passes_cancel() -> JSONResponse:
+    job = _passes["job"]
+    if job is None or job.done:
+        raise HTTPException(status_code=409, detail="No experiment is running")
+    job.cancel()
+    return JSONResponse({"cancelled": True})
+
+
 @app.get("/api/bench")
 def api_bench_list() -> JSONResponse:
     out = []
     for p in sorted(LOGS_DIR.glob("bench_*.json"), reverse=True):
+        if not p.stem.startswith("bench_"):
+            continue
         try:
             with open(p) as f:
                 d = json.load(f)

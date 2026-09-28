@@ -28,6 +28,7 @@ from control.run_loop import TrackingRunner
 from perception.frame_source import SimulatorFrameSource, VideoFileFrameSource
 from simulator.camera_model import CameraModel, PTZActuator
 from simulator.disturbances import DisturbanceConfig
+from simulator.obc_model import cue_from_config
 from simulator.renderer import SimulatorEngine
 from simulator.scene import Scene
 
@@ -109,7 +110,7 @@ class LiveEngine:
         run_name = time.strftime("run_%Y%m%d_%H%M%S")
         self._run_name = run_name
 
-        camera = ptz = engine = None
+        camera = ptz = engine = cue = None
         if video_path:
             frame_source = VideoFileFrameSource(video_path)
         else:
@@ -124,10 +125,11 @@ class LiveEngine:
             dcfg = DisturbanceConfig.from_config(config)
             engine = SimulatorEngine(scene, camera, dcfg)
             frame_source = SimulatorFrameSource(engine, fps=cam_cfg["update_rate_hz"])
+            cue = cue_from_config(config, scene, camera.world_px_per_deg)
         source = _PacedSource(frame_source) if realtime else frame_source
 
         ground_truth_fn = (lambda: frame_source.last_ground_truth) if camera is not None else None
-        runner = TrackingRunner(config, source, camera=camera, ptz=ptz, ground_truth_fn=ground_truth_fn)
+        runner = TrackingRunner(config, source, camera=camera, ptz=ptz, ground_truth_fn=ground_truth_fn, cue=cue)
 
         screen = config["screen"]
         self._info = {
@@ -140,6 +142,7 @@ class LiveEngine:
             "num_targets": None if video_path else config["target"].get("num_targets", 1),
             "preset": config.get("scenario_preset"),
             "algorithms": registry.describe_selection(config),
+            "cue": None if cue is None else {"sigma_deg": cue.sigma, "error_deg": round(cue.error_deg(0.0), 3)},
         }
 
         def on_telemetry(telemetry, frame):
@@ -153,6 +156,11 @@ class LiveEngine:
                     "fov": [fov_w, fov_h],
                     "targets": [list(t.position(engine.t)) for t in engine.scene.targets],
                 }
+                if cue is not None:
+                    cx, cy = cue.at(engine.t)
+                    world["cue"] = [runner.stepper._ref_world_xy[0] + cx * camera.world_px_per_deg,
+                                    runner.stepper._ref_world_xy[1] + cy * camera.world_px_per_deg,
+                                    3 * cue.sigma * camera.world_px_per_deg]
             with self._frames_lock:
                 self._new_frames.append(record)
                 self._snapshot = (frame.image, record, world)

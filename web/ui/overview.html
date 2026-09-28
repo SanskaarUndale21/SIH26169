@@ -36,13 +36,14 @@
 <main class="main">
   <section class="hero">
     <div>
-      <h1 class="display">Find the beacon.<br>Hold the lock.</h1>
-      <p class="lede">The coarse stage of an optical link's pointing system, built entirely in software.
-        A virtual pan-tilt camera searches a 2000 × 2000 px scene, detects the beacon spot, and keeps it
-        centred through sensor noise, fog and platform shake, so the fine stage can take over.</p>
+      <h1 class="display">Test your pointing algorithm. No hardware.</h1>
+      <p class="lede">A test bench for the coarse stage of free-space optical links. Plug in your own beacon detector,
+        tracker or gimbal controller as one Python class, then run it on a virtual pan-tilt camera with noise, fog,
+        platform shake and on-board-computer pointing cues, scored against ISRO's targets and against our reference tracker.</p>
       <div class="actions">
-        <a class="btn primary lg" href="/setup">Set up a simulated run</a>
-        <a class="btn lg" href="/setup?source=video">Benchmark a video file</a>
+        <a class="btn primary lg" href="/algorithms">Test your algorithm</a>
+        <a class="btn lg" href="/compare">Compare algorithms</a>
+        <a class="btn quiet lg" href="/setup">Run a scenario</a>
       </div>
     </div>
     <div class="scope">
@@ -54,7 +55,7 @@
   <section class="section" id="latest">
     <div class="section-head">
       <div>
-        <h2>Latest run against the spec</h2>
+        <h2>Reference tracker, latest run against the spec</h2>
         <div class="latest-meta muted small" id="latest-meta">Loading results</div>
       </div>
       <a class="btn quiet" id="latest-link" href="/runs" hidden>Open full report</a>
@@ -63,12 +64,12 @@
   </section>
 
   <section class="section">
-    <div class="section-head"><h2>What happens every frame</h2></div>
+    <div class="section-head"><h2>What happens every frame, and what you can replace</h2></div>
     <div class="steps">
       <div class="step"><span class="n">1</span><h3>Observe</h3>
         <p>The virtual 640 × 480 camera renders its 4° × 3° view of the scene at 30 Hz, with the selected noise, weather, jitter and drift applied.</p></div>
       <div class="step"><span class="n">2</span><h3>Acquire</h3>
-        <p>A difference-of-Gaussians detector finds point-like spots above the local noise floor. A spot must persist for several frames before it counts as the beacon.</p></div>
+        <p>A detector finds beacon-like spots: our learned CNN or classical difference-of-Gaussians, or yours. With an on-board-computer cue, the camera first slews to the predicted direction and scans around it. <a href="/algorithms">Swappable</a>.</p></div>
       <div class="step"><span class="n">3</span><h3>Estimate</h3>
         <p>An interacting multiple-model filter blends straight, turning and erratic motion models to predict where the beacon is, even between missed detections.</p></div>
       <div class="step"><span class="n">4</span><h3>Point</h3>

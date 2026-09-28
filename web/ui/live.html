@@ -146,7 +146,8 @@ const LEGENDS = {
     <span><i style="background:#ffb53d"></i>Detected spot</span><span><i style="background:transparent;border:1.5px dashed #e8ecf7"></i>True beacon position</span>
     <span><i style="background:transparent;border:1.5px solid #6c7aa3"></i>Boresight</span>`,
   world: `<span><i style="background:transparent;border:1.5px solid #37d8a8"></i>Camera view (colour = lock state)</span>
-    <span><i style="background:#ffb53d"></i>Beacon</span><span><i style="background:#8fb4ff"></i>Boresight path</span>`,
+    <span><i style="background:#ffb53d"></i>Beacon</span><span><i style="background:#8fb4ff"></i>Boresight path</span>
+    <span><i style="background:transparent;border:1.5px dashed #d69cff"></i>OBC cue, 3σ search area</span>`,
   gimbal: `<span><i style="background:#37d8a8"></i>Cone = boresight, colour = lock state</span><span><i style="background:#ffb53d"></i>Beacon (truth)</span>
     <span><i style="background:#e8ecf7"></i>Tracker estimate</span><span class="faint">Drag to orbit, scroll to zoom</span>`,
 };
@@ -231,6 +232,12 @@ function drawWorld() {
   camTrail.forEach(([x, y], i) => i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.stroke();
   ctx.strokeStyle = "rgba(255,181,61,0.35)"; ctx.beginPath();
   worldTrail.forEach(([x, y], i) => i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.stroke();
+  if (lastWorld.cue) {
+    const [qx, qy, qr] = lastWorld.cue;
+    ctx.strokeStyle = "rgba(214,156,255,0.8)"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(X(qx), Y(qy), Math.max(4, qr * k), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#d69cff"; ctx.beginPath(); ctx.arc(X(qx), Y(qy), 3, 0, Math.PI * 2); ctx.fill();
+  }
   lastWorld.targets.forEach(([x, y]) => { ctx.fillStyle = "#ffb53d"; ctx.fillRect(X(x) - 4, Y(y) - 4, 8, 8); });
   const [cxw, cyw] = lastWorld.cam, [fw, fh] = lastWorld.fov;
   const col = { locked: "#37d8a8", acquiring: "#8fb4ff", reacquiring: "#8fb4ff", searching: "#ff6e57" }[lastRecord?.lock_state] || "#6c7aa3";

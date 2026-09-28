@@ -33,7 +33,7 @@ class RunResult:
 class TrackingRunner:
     def __init__(self, config: dict, frame_source: FrameSource,
                  camera=None, ptz=None,
-                 ground_truth_fn: Optional[Callable[[], list]] = None):
+                 ground_truth_fn: Optional[Callable[[], list]] = None, cue=None):
         """camera: simulator.camera_model.CameraModel, only present in
         simulator mode (used to convert pixel error -> degrees for PID and
         to know px_per_deg). ptz: simulator.camera_model.PTZActuator to
@@ -46,6 +46,13 @@ class TrackingRunner:
         # search logic; shared with gui/main_window.py so both entry
         # points drive the PTZ identically (see control/stepper.py).
         self.stepper = PointingStepper(config, camera) if camera is not None else None
+        # OBC pointing cue (simulator/obc_model.py), if this run has one
+        self.cue = cue
+        if self.stepper is not None and cue is not None:
+            self.stepper.set_cue(cue)
+        # Beacon direction measured at first lock (deg), for multi-pass learning
+        self.acquired_direction_deg: Optional[tuple] = None
+        self.acquired_time: Optional[float] = None
         self.actuator: Actuator = SimulatorActuator(ptz) if ptz is not None else NullActuator()
         self.ground_truth_fn = ground_truth_fn
         self.link_cfg = LinkBudgetConfig.from_config(config)
@@ -71,6 +78,12 @@ class TrackingRunner:
         if frame is None:
             raise RuntimeError("frame source produced no frames")
         self.pipeline = PerceptionTrackingPipeline(self.config, frame.image.shape[1], frame.image.shape[0])
+        if self.cue is not None:
+            from simulator.obc_model import CueView
+            view = CueView(self.cue)
+            self.pipeline.ctx.cue = view
+            if self.stepper is not None:
+                self.stepper.controller.ctx.cue = view
 
         n = 0
         t_start = time.perf_counter()
@@ -100,6 +113,14 @@ class TrackingRunner:
             self.metrics.record_frame(telemetry.timestamp, telemetry.lock_state, tracking_error, proc_ms,
                                        angular_error_urad=angular_error, link_loss_db=link_loss,
                                        handoff_ready=handoff_ready, centroid_error_px=centroid_error)
+            if (self.acquired_direction_deg is None and telemetry.lock_state == "locked"
+                    and self.stepper is not None and frame.fov_deg is not None):
+                # boresight angle + the estimate's offset in the image = measured beacon direction
+                bx, by = self.stepper.boresight_deg()
+                self.acquired_direction_deg = (
+                    bx + (telemetry.predicted_px[0] - frame.image.shape[1] / 2) / self.camera.px_per_deg_x,
+                    by + (telemetry.predicted_px[1] - frame.image.shape[0] / 2) / self.camera.px_per_deg_y)
+                self.acquired_time = telemetry.timestamp
             self.telemetry_log.append(telemetry)
             self.frame_log.add(self._make_frame_record(telemetry, frame))
             if self.on_telemetry:

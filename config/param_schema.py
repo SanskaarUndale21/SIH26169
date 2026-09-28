@@ -87,7 +87,8 @@ PARAM_SCHEMA: List[Param] = [
     Param(("target", "size_px", 0), "Width", "Target", "int", 10, 5, 20, 1, unit="px"),
     Param(("target", "size_px", 1), "Height", "Target", "int", 10, 5, 20, 1, unit="px"),
     Param(("target", "initial_location"), "Initial location", "Target", "enum", "random",
-          options=[("random", "Random"), ("fixed_center", "Fixed (screen centre)")]),
+          options=[("random", "Random, near the centre"), ("anywhere", "Anywhere on screen (use with a pointing cue)"),
+                   ("fixed_center", "Fixed (screen centre)")]),
     Param(("target", "motion"), "Motion type", "Target", "enum", "straight_line",
           options=[("straight_line", "Straight line"), ("circular", "Circular"),
                     ("figure8", "Figure-8"), ("random", "Random walk"), ("spiral", "Spiral"),
@@ -204,6 +205,16 @@ PARAM_SCHEMA: List[Param] = [
     Param(("link_budget", "range_km"), "Link range", "Link Budget",
           "float", 1000.0, 1.0, 50000.0, 10.0, unit="km"),
 
+    # --- OBC pointing cue (simulator/obc_model.py) ---
+    Param(("cue", "enabled"), "Use the on-board computer's pointing cue", "Pointing Cue", "bool", False,
+          help="The satellite computer predicts where the other terminal is; the camera slews there, then scans"),
+    Param(("cue", "sigma_deg"), "Cue uncertainty (1 sigma)", "Pointing Cue", "float", 0.5, 0.0, 5.0, 0.05,
+          unit="deg", help="Random error of each pass. About 0.2 for satellite-to-ground, 1.5 for inter-satellite"),
+    Param(("cue", "bias_deg"), "Systematic cue error", "Pointing Cue", "float", 0.0, 0.0, 5.0, 0.05, unit="deg",
+          help="Same on every pass of a link (ephemeris or mounting error). Multi-pass learning can remove it"),
+    Param(("cue", "link_seed"), "Link id", "Pointing Cue", "int", 1, 1, 999, 1,
+          help="Which link: sets the direction of the systematic error, shared by all its passes"),
+
     # --- Scenario preset ---
     Param(("scenario_preset",), "Scenario preset", "Scenario Preset", "enum", "none",
           options=[("none", "None (use generic Target settings)"),
@@ -246,7 +257,7 @@ GROUP_ORDER = [
     "Motion: Straight Line", "Motion: Circular", "Motion: Figure-8", "Motion: Random Walk",
     "Motion: Spiral", "Motion: Sinusoidal", "Motion: User-defined",
     "PTZ", "Noise", "Jitter", "Atmosphere", "Turbulence", "Platform Motion",
-    "Link Budget", "Scenario Preset", "Detector", "IMM Tracker", "PID Control",
+    "Link Budget", "Pointing Cue", "Scenario Preset", "Detector", "IMM Tracker", "PID Control",
 ]
 
 
