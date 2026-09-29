@@ -1,0 +1,119 @@
+DEMO VIDEO SCRIPT
+Team Straw Hats, SIH 2026, Problem Statement 26169
+Length: about 3 minutes
+
+Where a line says [brackets], say the number that is actually on screen when you record.
+
+
+BEFORE YOU RECORD
+
+1. Double-click start.bat. It opens the web console at http://127.0.0.1:8420/ and the desktop app.
+2. Close Creative Cloud, Brave and Parsec so tracking holds 30 FPS while recording.
+3. Run these once beforehand, so on camera you open saved results instead of waiting:
+   a. Compare: sets "Default", "Alternatives" (example plugins) and one using "Learned CNN detector (experimental)". Scenarios: Spec defaults, Heavy sensor noise, Fog and shake, Moving platform. 1 repeat, 10 s.
+   b. Compare, Multi-pass learning tab: Inter-satellite, 8 passes.
+4. Keep data/sample_videos/test.mp4 open in a File Explorer window.
+5. Record at 1080p, browser full screen (F11), zoom 100%.
+
+
+SHOT 1: OPENING (0:00 to 0:12)
+
+Click: Nothing. Web console Overview; the scope finds the beacon and turns green.
+
+Say: "Free-space optical satellite links have to find and hold each other before they can talk. This is our software-only pointing, acquisition and tracking engine, and a test bench for anyone's algorithms. No optical hardware needed."
+
+Caption: SIH 2026, PS 26169: AI-based FSOC coarse alignment and algorithm test bench
+
+
+SHOT 2: ONE ENGINE, TWO FRONT-ENDS (0:12 to 0:25)
+
+Click: Show the desktop app tracking a run. Then switch to the web console and start a run there.
+
+Say: "One tracking core drives both a desktop app and a web console. Both are built from the same parameter schema, so a run means the same thing in either."
+
+Caption: One TrackingRunner core, 81-parameter shared config, desktop and web
+
+
+SHOT 3: DETECT, TRACK, CONTROL (0:25 to 0:55)
+
+Click:
+1. New run, then Heavy sensor noise. On the Disturbances step add Fog. The camera preview on the right changes.
+2. Start run. Let the Camera view run with the green crosshair on the beacon. Point at the right column as the spec rows turn green.
+3. Click Stop and save.
+
+Say: "A difference-of-Gaussians detector finds the beacon to sub-pixel accuracy. An interacting multiple-model filter blends straight, turning and random-walk motion so it holds through manoeuvres. A PID loop turns that into gimbal commands. Under noise and fog it locks in about [0.2] seconds and keeps every ISRO target green."
+
+Caption: Lock about 0.2 s, detection accuracy about 0.4 px, above 20 FPS, 65 tests passing
+
+
+SHOT 4: BRING YOUR OWN ALGORITHM (0:55 to 1:30)
+
+Click:
+1. Algorithms. Pause 2 seconds on "How your code plugs in".
+2. Click "Learned CNN detector (experimental)", then "Alpha-beta filter (example)".
+3. Write a new algorithm, choose Tracker, Open template, then Check. Two result rows appear. Click Save.
+
+Say: "Every stage can be swapped. We ship classical baselines and a learned CNN detector trained on our simulator. Engineers write their own detector, tracker or controller as one Python class, press Check, and it's tested on two scenarios in seconds."
+
+Caption: Detector, tracker, controller: each one Python class
+
+
+SHOT 5: FAIR COMPARISON (1:30 to 1:55)
+
+Click: Compare. Open the saved comparison under Past comparisons. Scroll the summary table (point at Centroid accuracy), the bar chart and the scenario matrix.
+
+Say: "Compare races algorithm sets on exactly the same beacon paths and noise, using shared random seeds, and scores every run against ISRO's targets. The learned detector is the only one that still locks with every disturbance at maximum."
+
+Caption: Same scenarios, same seeds, scored against the spec
+
+
+SHOT 6: ON-BOARD COMPUTER CUE AND LEARNING ACROSS PASSES (1:55 to 2:30)
+
+Click:
+1. New run, then Inter-satellite, cued, then Start run. On Live, click Whole screen: the purple ring is the predicted area; the camera slews there and locks. Stop.
+2. Compare, Multi-pass learning tab. Show the saved result: headline, chart, table.
+
+Say: "On orbit the satellite's computer tells the camera roughly where the other terminal is. The camera slews there and scans around it, so a beacon far off-axis is found in about [2] seconds. Between satellites that prediction is off by the same amount every pass, so the terminal learns it. With the raw cue, [2] passes never found the beacon. With learning, every pass did."
+
+Caption: Cue error [4] degrees down to [1] degree after learning, every pass locks
+
+
+SHOT 7: SAME PIPELINE, REAL VIDEO (2:30 to 2:45)
+
+Click: New run, Video file, drag in test.mp4, Start run. Let it lock, then open the report and point at Centroid log (CSV).
+
+Say: "For Benchmark 2 the same pipeline runs unmodified on recorded video, and writes a per-frame centroid log."
+
+Caption: Identical detect-track-control path for simulated and recorded input
+
+
+SHOT 8: CLOSE (2:45 to 3:00)
+
+Click: Spec check. Scroll quickly through the green rows, including the new mentor-guidance rows. Cut back to Overview locking green.
+
+Say: "Every requirement mapped and met, validated entirely in software, with a clean actuator interface so a real camera and gimbal drop in without touching the core. Thank you."
+
+Caption: Team Straw Hats: software-first PAT, hardware-ready
+
+Hold the final frame for 1 to 2 seconds.
+
+
+YOUTUBE DETAILS
+
+Title:
+FSOC Coarse Alignment Engine and Algorithm Test Bench | Team Straw Hats | SIH 2026 PS 26169
+
+Description:
+Software pointing, acquisition and tracking for free-space optical satellite links, built for Smart India Hackathon 2026, problem statement 26169 (ISRO).
+
+A virtual pan-tilt camera detects and tracks a moving beacon under noise, fog, jitter and platform motion, scored live against ISRO's targets. Engineers can plug in their own detector, tracker or controller and compare it fairly against our classical and learned (CNN) algorithms. Includes on-board-computer pointing cues with learning across passes, and real video input for Benchmark 2.
+
+Chapters
+0:00 Opening
+0:12 One engine, two front-ends
+0:25 Detect, track, control
+0:55 Bring your own algorithm
+1:30 Fair comparison
+1:55 On-board computer cue and multi-pass learning
+2:30 Real video input
+2:45 Close
